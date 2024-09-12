@@ -50,6 +50,8 @@ if not os.path.exists(log_dir):
         os.mkdir("./logs")
     log_dir = "./logs"
 
+print(f"Log directory: {log_dir}", flush=True)
+
 
 def find(name, path):
     for root, dirs, files in os.walk(path):
