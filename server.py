@@ -460,10 +460,14 @@ def send_down_notification(node):
     if not node["cert_853"]["valid"]:
         description += "- Certificate on port 853 is invalid\n"
 
-    # Also add the expiry date of the certificates
-    description += "\nCertificate expiry dates:\n"
-    description += f"- Certificate on port 443 expires {node['cert']['expires']}\n"
-    description += f"- Certificate on port 853 expires {node['cert_853']['expires']}\n"
+    if node["plain_dns"] and node["doh"] and node["dot"]:
+        if node["cert"]["valid"] and node["cert_853"]["valid"]:
+            description = f"The certificate on {node['name']} ({node['ip']}) is expiring soon\n"
+            title = f"{node['name']} certificate is expiring soon"
+        # Also add the expiry date of the certificates
+        description += "\nCertificate expiry dates:\n"
+        description += f"- Certificate on port 443 expires {node['cert']['expires']}\n"
+        description += f"- Certificate on port 853 expires {node['cert_853']['expires']}\n"
     send_notification(title, description, node["name"])
 
 
