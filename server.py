@@ -277,7 +277,7 @@ def format_last_check(last_log: datetime) -> str:
         minutes = delta.seconds // 60
         return f"{minutes} minutes ago" if minutes > 1 else "1 minute ago"
     else:
-        return f"{delta.seconds} seconds ago" if delta.seconds > 1 else "1 second ago"
+        return "less than a minute ago"
 
 
 def check_nodes() -> list:
