@@ -42,23 +42,24 @@
 <body>
     <header>
         <nav class="navbar navbar-expand-md fixed-top bg-dark py-3" data-bs-theme="dark">
-            <div class="container-fluid"><a class="navbar-brand d-flex align-items-center" href="/#"><span
+            <div class="container-fluid"><a class="navbar-brand d-flex align-items-center" href="https://welcome.hnsdoh.com"><span
                         class="bs-icon-sm bs-icon-rounded bs-icon-primary d-flex justify-content-center align-items-center me-2 bs-icon"><img
                             src="assets/img/HNSW.png" width="20px"></span><span>HNS DoH</span></a></div>
         </nav>
     </header>
+    <div style="margin: 100px;"></div>
     <section id="intro">
         <div class="text-center">
-            <h1 class="text-center" style="font-size: 60px;">HNS DoH</h1>
+            <h1 class="text-center" style="font-size: 60px;">HNS DoH Status</h1>
             <div class="warnings">
                 <!-- Check if warnings is empty -->
                 {% if warnings %}
-                    <div class="alert alert-danger" role="alert">
-                        <h4 class="alert-heading">Warnings</h4>
-                        {% for warning in warnings %}
-                            <p>{{ warning }}</p>
-                        {% endfor %}
-                    </div>
+                <div class="alert alert-danger" role="alert">
+                    <h4 class="alert-heading">Warning</h4>
+                    {% for warning in warnings %}
+                    <p>{{ warning }}</p>
+                    {% endfor %}
+                </div>
                 {% endif %}
 
             </div>
@@ -66,45 +67,52 @@
     </section>
 
     <section id="status"></section>
-        <div class="text-center" style="width: fit-content;margin: auto;max-width: 100%;">
-            <h1 class="text-center" style="font-size: 60px;">Nodes</h1>
-            <span style="font-size: smaller;margin-bottom: 10px;">Last check: {{last_check}}</span>
-            <div class="spacer"></div>
-            <div class="node" style="display: block;">
-                <div>
-                    <h2 style="display: inline;">Overall</h2>
-                </div>
-                <div>
-                    <h5>Stats</h5>
-                    <p>Plain DNS: {{history.overall.plain_dns.percentage}}% uptime (last down {{history.overall.plain_dns.last_down}})</p>
-                    <p>DNS over HTTPS: {{history.overall.doh.percentage}}% uptime (last down {{history.overall.doh.last_down}})</p>
-                    <p>DNS over TLS: {{history.overall.dot.percentage}}% uptime (last down {{history.overall.dot.last_down}})</p>
-                </div>                    
-            </div>    
-            <div class="spacer"></div>
-            {% for node in nodes %}
-                <div class="node">
-                    <div>
-                        <h2 style="display: inline;">{{node.location}}</h2>
-                        <h4 style="display: inline;">({{ node.name }})</h4>
-                    </div>
-                    <div>
-                        <h5>Current Status</h5>
-                        <p>Plain DNS: {{node.plain_dns}}</p>
-                        <p>DNS over HTTPS: {{node.doh}}</p>
-                        <p>DNS over TLS: {{node.dot}}</p>
-                        <p>Certificate: {{node.cert.valid}} (expires {{node.cert.expires}})</p>
-                    </div>
-                    <div>
-                        <h5>Stats</h5>
-                        <p>Plain DNS: {{history.nodes[node.name].plain_dns.percentage}}% uptime (last down {{history.nodes[node.name].plain_dns.last_down}})</p>
-                        <p>DNS over HTTPS: {{history.nodes[node.name].doh.percentage}}% uptime (last down {{history.nodes[node.name].doh.last_down}})</p>
-                        <p>DNS over TLS: {{history.nodes[node.name].dot.percentage}}% uptime (last down {{history.nodes[node.name].dot.last_down}})</p>
-                    </div>
-                </div>        
-            
-            {% endfor %}
+    <div class="text-center" style="width: fit-content;margin: auto;max-width: 100%;">
+        <span style="font-size: smaller;margin-bottom: 10px;">Last check: {{last_check}}</span>
+        <div class="spacer"></div>
+        <div class="node" style="display: block;">
+            <div>
+                <h2>Overall Stats</h2>
+            </div>
+            <div class="node-info">
+                <p>Plain DNS: {{history.overall.plain_dns.percentage}}% uptime (last down
+                    {{history.overall.plain_dns.last_down}})</p>
+                <p>DNS over HTTPS: {{history.overall.doh.percentage}}% uptime (last down
+                    {{history.overall.doh.last_down}})</p>
+                <p>DNS over TLS: {{history.overall.dot.percentage}}% uptime (last down
+                    {{history.overall.dot.last_down}})</p>
+            </div>
         </div>
+        <div class="spacer"></div>
+        {% for node in nodes %}
+        <div class="node">
+            <div>
+                <h2>{{node.location}}</h2>
+            </div>
+            <div class="node-info">
+                <h5>Current Status</h5>
+                <p>Plain DNS: {{node.plain_dns}}</p>
+                <p>DNS over HTTPS: {{node.doh}}</p>
+                <p>DNS over TLS: {{node.dot}}</p>
+                <p>Certificate: {% if node.cert.valid %} Valid {% else %} Invalid {% endif %} (expires
+                    {{node.cert.expires}})</p>
+            </div>
+            <div class="node-info">
+                <h5>Stats</h5>
+                <p>Plain DNS: {{history.nodes[node.name].plain_dns.percentage}}% uptime (last down
+                    {{history.nodes[node.name].plain_dns.last_down}})</p>
+                <p>DNS over HTTPS: {{history.nodes[node.name].doh.percentage}}% uptime (last down
+                    {{history.nodes[node.name].doh.last_down}})</p>
+                <p>DNS over TLS: {{history.nodes[node.name].dot.percentage}}% uptime (last down
+                    {{history.nodes[node.name].dot.last_down}})</p>
+            </div>
+            <div class="node-info">
+                <p>{{node.name}}: {{node.ip}}</p>
+            </div>
+        </div>
+
+        {% endfor %}
+    </div>
     </section>
 
     <section id="setup"

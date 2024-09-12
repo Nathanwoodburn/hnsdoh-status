@@ -589,7 +589,7 @@ def convert_nodes_to_dict(nodes):
 # region API routes
 @app.route("/api/nodes")
 def api_nodes():
-    node_status = check_nodes()
+    node_status = check_nodes_from_log()
     return jsonify(node_status)
 
 
@@ -686,6 +686,15 @@ def index():
     history_summary["nodes"] = convert_nodes_to_dict(history_summary["nodes"])
     last_check = format_last_check(last_log)
     
+    # Replace true/false with up/down
+    for node in node_status:
+        for key in ["plain_dns", "doh", "dot"]:
+            if node[key]:
+                node[key] = "Up"
+            else:
+                node[key] = "Down"
+
+
     return render_template(
         "index.html",
         nodes=node_status,
