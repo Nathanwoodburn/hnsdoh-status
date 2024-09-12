@@ -5,3 +5,4 @@ dnspython
 dnslib
 python-dateutil
 python-dotenv
+schedule
