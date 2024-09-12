@@ -51,10 +51,22 @@
     <section id="intro">
         <div class="text-center">
             <h1 class="text-center" style="font-size: 60px;">HNS DoH Status</h1>
+            <div class="errors">
+                <!-- Check if errors is empty -->
+                {% if alerts %}
+                <div class="alert alert-danger" role="alert">
+                    <h4 class="alert-heading">Alert</h4>
+                    {% for alert in alerts %}
+                    <p>{{ alert }}</p>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+            </div>
             <div class="warnings">
                 <!-- Check if warnings is empty -->
                 {% if warnings %}
-                <div class="alert alert-danger" role="alert">
+                <div class="alert alert-warning" role="alert">
                     <h4 class="alert-heading">Warning</h4>
                     {% for warning in warnings %}
                     <p>{{ warning }}</p>

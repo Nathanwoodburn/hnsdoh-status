@@ -56,6 +56,19 @@ if not os.path.exists(log_dir):
         os.mkdir("./logs")
     log_dir = "./logs"
 
+if not os.path.exists(f"{log_dir}/node_status.json"):
+    with open(f"{log_dir}/node_status.json", "w") as file:
+        json.dump([], file) 
+
+if not os.path.exists(f"{log_dir}/sent_notifications.json"):
+    with open(f"{log_dir}/sent_notifications.json", "w") as file:
+        json.dump({}, file)
+else:
+    with open(f"{log_dir}/sent_notifications.json", "r") as file:
+        sent_notifications = json.load(file)
+
+
+
 print(f"Log directory: {log_dir}", flush=True)
 
 
@@ -147,7 +160,7 @@ def build_dns_query(domain: str, qtype: str = "A"):
 
 def check_doh(ip: str) -> bool:
     status = False
-    try:        
+    try:
         dns_query = build_dns_query("2.wdbrn", "TXT")
         request = (
             f"POST /dns-query HTTP/1.1\r\n"
@@ -183,7 +196,8 @@ def check_doh(ip: str) -> bool:
 
     finally:
         # Close the socket connection
-        if ssock:
+        # Check if ssock is defined
+        if "ssock" in locals():
             ssock.close()
     return status
 
@@ -330,24 +344,13 @@ def check_nodes() -> list:
             node["cert"]["expiry_date"], "%b %d %H:%M:%S %Y GMT"
         )
         if cert_expiry < datetime.now() + relativedelta.relativedelta(days=7):
-            if node["ip"] not in sent_notifications:
-                sent_notifications[node["ip"]] = datetime.now()
-                send_down_notification(node)
-                continue
-            if sent_notifications[node["ip"]] < datetime.now() - relativedelta.relativedelta(days=1):   
-                send_down_notification(node)
-                continue
+            send_down_notification(node)
+            continue
         cert_853_expiry = datetime.strptime(
             node["cert_853"]["expiry_date"], "%b %d %H:%M:%S %Y GMT"
         )
         if cert_853_expiry < datetime.now() + relativedelta.relativedelta(days=7):
-            if node["ip"] not in sent_notifications:
-                sent_notifications[node["ip"]] = datetime.now()
                 send_down_notification(node)
-                continue
-            if sent_notifications[node["ip"]] < datetime.now() - relativedelta.relativedelta(days=1):   
-                send_down_notification(node)
-                continue
     return node_status
 
 def check_nodes_from_log() -> list:
@@ -399,6 +402,29 @@ def send_notification(title, description,author):
 
 
 def send_down_notification(node):
+    global sent_notifications
+
+    # Check if a notification has already been sent
+    if node["ip"] not in sent_notifications:
+        sent_notifications[node["ip"]] = datetime.strftime(datetime.now(), "%Y-%m-%d %H:%M:%S")
+    else:
+        last_send = datetime.strptime(sent_notifications[node["ip"]], "%Y-%m-%d %H:%M:%S")
+
+        if last_send > datetime.now() - relativedelta.relativedelta(hours=1):
+            print(f"Notification already sent for {node['name']} in the last hr", flush=True)
+            return
+
+        # Only send certain notifications once per day 
+        if node["plain_dns"] and node["doh"] and node["dot"]:
+            if last_send > datetime.now() - relativedelta.relativedelta(days=1):
+                print(f"Notification already sent for {node['name']} in the last day", flush=True)
+                return
+            
+    # Save the notification to the file
+    sent_notifications[node["ip"]] = datetime.strftime(datetime.now(), "%Y-%m-%d %H:%M:%S")
+    with open(f"{log_dir}/sent_notifications.json", "w") as file:
+        json.dump(sent_notifications, file, indent=4)
+
     title = f"{node['name']} is down"
 
     description = f"{node['name']} ({node['ip']}) is down with the following issues:\n"
@@ -641,36 +667,48 @@ def api_refresh():
 def index():
     node_status = check_nodes_from_log()
 
+    alerts = []
     warnings = []
     for node in node_status:
         if not node["plain_dns"]:
-            warnings.append(f"{node['name']} does not support plain DNS")
+            alerts.append(f"{node['name']} does not support plain DNS")
 
         if not node["doh"]:
-            warnings.append(f"{node['name']} does not support DoH")
+            alerts.append(f"{node['name']} does not support DoH")
 
         if not node["dot"]:
-            warnings.append(f"{node['name']} does not support DoT")
+            alerts.append(f"{node['name']} does not support DoT")
 
         if not node["cert"]["valid"]:
-            warnings.append(f"{node['name']} has an invalid certificate")
+            alerts.append(f"{node['name']} has an invalid certificate")
 
         if not node["cert_853"]["valid"]:
-            warnings.append(f"{node['name']} has an invalid certificate on port 853")
+            alerts.append(f"{node['name']} has an invalid certificate on port 853")
 
         cert_expiry = datetime.strptime(
             node["cert"]["expiry_date"], "%b %d %H:%M:%S %Y GMT"
         )
-        if cert_expiry < datetime.now() + relativedelta.relativedelta(days=7):
-            warnings.append(
-                f"{node['name']} has a certificate expiring in less than 7 days on port 443"
+        if cert_expiry < datetime.now():
+            alerts.append(
+                f"The {node['name']} node's certificate has expired"
             )
+            continue
+        elif cert_expiry < datetime.now() + relativedelta.relativedelta(days=7):
+            warnings.append(
+                f"The {node['name']} node's certificate is expiring {format_relative_time(cert_expiry)}"
+            )
+            continue
         cert_853_expiry = datetime.strptime(
             node["cert_853"]["expiry_date"], "%b %d %H:%M:%S %Y GMT"
         )
-        if cert_853_expiry < datetime.now() + relativedelta.relativedelta(days=7):
+        if cert_853_expiry < datetime.now():
+            alerts.append(
+                f"The {node['name']} node's certificate has expired for DNS over TLS (port 853)"
+            )
+            continue
+        elif cert_853_expiry < datetime.now() + relativedelta.relativedelta(days=7):
             warnings.append(
-                f"{node['name']} has a certificate expiring in less than 7 days on port 853"
+                f"The {node['name']} node's certificate is expiring {format_relative_time(cert_853_expiry)} for DNS over TLS (port 853)"
             )
         
 
@@ -698,6 +736,7 @@ def index():
         "index.html",
         nodes=node_status,
         warnings=warnings,
+        alerts=alerts,
         history=history_summary,
         last_check=last_check,
     )
