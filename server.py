@@ -392,7 +392,10 @@ def send_notification(title, description,author):
             "attachments": [],
         }
         response = requests.post(discord_hook, json=data)
-        print(response.text, flush=True)
+        print("Sent notification", flush=True)
+    else:
+        print("No discord hook", flush=True)
+
 
 def send_down_notification(node):
     title = f"{node['name']} is down"
@@ -624,6 +627,10 @@ def api_all():
     history = get_history(history_days)
     return jsonify(history)
 
+@app.route("/api/refresh")
+def api_refresh():
+    node_status = check_nodes()
+    return jsonify(node_status)
 
 # endregion
 
