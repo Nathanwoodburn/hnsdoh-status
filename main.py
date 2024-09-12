@@ -32,7 +32,7 @@ def check():
 
 
 def run_scheduler(stop_event):
-    schedule.every(1).minutes.do(check)
+    schedule.every(5).minutes.do(check)
     while not stop_event.is_set():
         schedule.run_pending()
         time.sleep(1)
