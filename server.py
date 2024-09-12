@@ -366,7 +366,6 @@ def check_nodes_from_log() -> list:
     node_status = newest["nodes"]
     if datetime.now() > newest["date"] + relativedelta.relativedelta(minutes=10):
         print("Failed to get a new enough log, checking nodes", flush=True)
-        print(newest["date"])
         node_status = check_nodes()
     else:
         last_log = newest["date"]
