@@ -380,16 +380,16 @@ def send_notification(title, description,author):
                 {
                     "title": title,
                     "description": description,
-                    "url": "https://hnsdoh.c.woodburn.au",
+                    "url": "https://status.hnsdoh.com",
                     "color": 5814783,
                     "author": {
                         "name": author,
-                        "icon_url": "https://hnsdoh.c.woodburn.au/favicon.png",
+                        "icon_url": "https://status.hnsdoh.com/favicon.png",
                     },
                 }
             ],
             "username": "HNSDoH",
-            "avatar_url": "https://hnsdoh.c.woodburn.au/favicon.png",
+            "avatar_url": "https://status.hnsdoh.com/favicon.png",
             "attachments": [],
         }
         response = requests.post(discord_hook, json=data)
