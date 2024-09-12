@@ -111,12 +111,12 @@
             </div>
             <div class="node-info">
                 <h5>Stats</h5>
-                <p>Plain DNS: {{history.nodes[node.name].plain_dns.percentage}}% uptime (last down
-                    {{history.nodes[node.name].plain_dns.last_down}})</p>
-                <p>DNS over HTTPS: {{history.nodes[node.name].doh.percentage}}% uptime (last down
-                    {{history.nodes[node.name].doh.last_down}})</p>
-                <p>DNS over TLS: {{history.nodes[node.name].dot.percentage}}% uptime (last down
-                    {{history.nodes[node.name].dot.last_down}})</p>
+                <p>Plain DNS: {{history.nodes[node.ip].plain_dns.percentage}}% uptime (last down
+                    {{history.nodes[node.ip].plain_dns.last_down}})</p>
+                <p>DNS over HTTPS: {{history.nodes[node.ip].doh.percentage}}% uptime (last down
+                    {{history.nodes[node.ip].doh.last_down}})</p>
+                <p>DNS over TLS: {{history.nodes[node.ip].dot.percentage}}% uptime (last down
+                    {{history.nodes[node.ip].dot.last_down}})</p>
             </div>
             <div class="node-info">
                 <p style="font-weight: bold;">{{node.name}}: {{node.ip}}</p>

@@ -1,0 +1,66 @@
+body {
+    background-color: #000000;
+    color: #ffffff;
+}
+.centre {
+    text-align: center;
+    margin-top: 10px;
+}
+h1 {
+    font-size: 100px;
+    margin: 0;
+    padding: 0;
+}
+p {
+    font-size: 18px;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+ul {
+    list-style-type: none; /* Remove bullet points */
+    padding: 0;
+    margin: 0;
+}
+
+li {
+    margin-bottom: 15px;
+}
+
+/* Style for the route names */
+li strong {
+    color: #9ccdff; /* Darker shade for route names */
+    font-size: 16px;
+}
+
+/* Style for descriptions */
+li em {
+    font-size: 14px;
+    color: #ffa44f; /* Lighter shade for parameter labels */
+}
+
+/* Nested parameter list */
+li ul {
+    margin-left: 20px;
+    margin-top: 8px;
+}
+
+li ul li {
+    font-size: 14px;
+    color: #cfcfcf; /* Parameter details */
+}
+
+/* Styling parameter names */
+li ul li strong {
+    color: #3498db; /* Light blue for parameter names */
+}
+
+/* Add a subtle hover effect */
+li.top:hover {
+    /* Invert colours */
+    filter: invert(1);
+    background-color: #000000;
+    border-left: 4px solid #3498db;
+    padding-left: 10px;
+    transition: all 0.3s ease;
+}

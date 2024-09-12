@@ -58,7 +58,7 @@ if not os.path.exists(log_dir):
 
 if not os.path.exists(f"{log_dir}/node_status.json"):
     with open(f"{log_dir}/node_status.json", "w") as file:
-        json.dump([], file) 
+        json.dump([], file)
 
 if not os.path.exists(f"{log_dir}/sent_notifications.json"):
     with open(f"{log_dir}/sent_notifications.json", "w") as file:
@@ -66,7 +66,6 @@ if not os.path.exists(f"{log_dir}/sent_notifications.json"):
 else:
     with open(f"{log_dir}/sent_notifications.json", "r") as file:
         sent_notifications = json.load(file)
-
 
 
 print(f"Log directory: {log_dir}", flush=True)
@@ -174,7 +173,7 @@ def check_doh(ip: str) -> bool:
         sock = socket.create_connection((ip, 443))
         context = ssl.create_default_context()
         ssock = context.wrap_socket(sock, server_hostname="hnsdoh.com")
-    
+
         ssock.sendall(wireframe_request)
         response_data = b""
         while True:
@@ -262,6 +261,7 @@ def format_relative_time(expiry_date: datetime) -> str:
     else:
         return f"in {delta.seconds} seconds" if delta.seconds > 1 else "in 1 second"
 
+
 def format_last_check(last_log: datetime) -> str:
     now = datetime.now()
     delta = now - last_log
@@ -278,6 +278,7 @@ def format_last_check(last_log: datetime) -> str:
         return f"{minutes} minutes ago" if minutes > 1 else "1 minute ago"
     else:
         return f"{delta.seconds} seconds ago" if delta.seconds > 1 else "1 second ago"
+
 
 def check_nodes() -> list:
     global nodes
@@ -336,7 +337,13 @@ def check_nodes() -> list:
 
     # Send notifications if any nodes are down
     for node in node_status:
-        if not node["plain_dns"] or not node["doh"] or not node["dot"] or not node["cert"]["valid"] or not node["cert_853"]["valid"]:
+        if (
+            not node["plain_dns"]
+            or not node["doh"]
+            or not node["dot"]
+            or not node["cert"]["valid"]
+            or not node["cert_853"]["valid"]
+        ):
             send_down_notification(node)
             continue
         # Check if cert is expiring in 7 days
@@ -350,8 +357,9 @@ def check_nodes() -> list:
             node["cert_853"]["expiry_date"], "%b %d %H:%M:%S %Y GMT"
         )
         if cert_853_expiry < datetime.now() + relativedelta.relativedelta(days=7):
-                send_down_notification(node)
+            send_down_notification(node)
     return node_status
+
 
 def check_nodes_from_log() -> list:
     global last_log
@@ -374,7 +382,8 @@ def check_nodes_from_log() -> list:
         last_log = newest["date"]
     return node_status
 
-def send_notification(title, description,author):
+
+def send_notification(title, description, author):
     discord_hook = os.getenv("DISCORD_HOOK")
     if discord_hook:
         data = {
@@ -406,22 +415,34 @@ def send_down_notification(node):
 
     # Check if a notification has already been sent
     if node["ip"] not in sent_notifications:
-        sent_notifications[node["ip"]] = datetime.strftime(datetime.now(), "%Y-%m-%d %H:%M:%S")
+        sent_notifications[node["ip"]] = datetime.strftime(
+            datetime.now(), "%Y-%m-%d %H:%M:%S"
+        )
     else:
-        last_send = datetime.strptime(sent_notifications[node["ip"]], "%Y-%m-%d %H:%M:%S")
+        last_send = datetime.strptime(
+            sent_notifications[node["ip"]], "%Y-%m-%d %H:%M:%S"
+        )
 
         if last_send > datetime.now() - relativedelta.relativedelta(hours=1):
-            print(f"Notification already sent for {node['name']} in the last hr", flush=True)
+            print(
+                f"Notification already sent for {node['name']} in the last hr",
+                flush=True,
+            )
             return
 
-        # Only send certain notifications once per day 
+        # Only send certain notifications once per day
         if node["plain_dns"] and node["doh"] and node["dot"]:
             if last_send > datetime.now() - relativedelta.relativedelta(days=1):
-                print(f"Notification already sent for {node['name']} in the last day", flush=True)
+                print(
+                    f"Notification already sent for {node['name']} in the last day",
+                    flush=True,
+                )
                 return
-            
+
     # Save the notification to the file
-    sent_notifications[node["ip"]] = datetime.strftime(datetime.now(), "%Y-%m-%d %H:%M:%S")
+    sent_notifications[node["ip"]] = datetime.strftime(
+        datetime.now(), "%Y-%m-%d %H:%M:%S"
+    )
     with open(f"{log_dir}/sent_notifications.json", "w") as file:
         json.dump(sent_notifications, file, indent=4)
 
@@ -438,12 +459,12 @@ def send_down_notification(node):
         description += "- Certificate on port 443 is invalid\n"
     if not node["cert_853"]["valid"]:
         description += "- Certificate on port 853 is invalid\n"
-    
+
     # Also add the expiry date of the certificates
     description += "\nCertificate expiry dates:\n"
     description += f"- Certificate on port 443 expires {node['cert']['expires']}\n"
     description += f"- Certificate on port 853 expires {node['cert_853']['expires']}\n"
-    send_notification(title, description, node['name'])
+    send_notification(title, description, node["name"])
 
 
 # endregion
@@ -514,6 +535,7 @@ def summarize_history(history: list) -> dict:
         lambda: {
             "name": "",
             "location": "",
+            "ip": "",
             "plain_dns": {"last_down": "Never", "percentage": 0},
             "doh": {"last_down": "Never", "percentage": 0},
             "dot": {"last_down": "Never", "percentage": 0},
@@ -542,17 +564,18 @@ def summarize_history(history: list) -> dict:
             if nodes_status[ip]["name"] == "":
                 nodes_status[ip]["name"] = node.get("name", "")
                 nodes_status[ip]["location"] = node.get("location", "")
+                nodes_status[ip]["ip"] = ip
 
             # Update counts and last downtime
             for key in ["plain_dns", "doh", "dot"]:
                 status = node.get(key, "up")
-                if status == "down":
+                if status == False:
                     total_counts[ip][key]["down"] += 1
                 total_counts[ip][key]["total"] += 1
 
             # Update last downtime for each key
             for key in ["plain_dns", "doh", "dot"]:
-                if node.get(key) == "down":
+                if node.get(key) == False:
                     nodes_status[ip][key]["last_down"] = date.strftime(
                         "%Y-%m-%d %H:%M:%S"
                     )
@@ -566,6 +589,8 @@ def summarize_history(history: list) -> dict:
             down = total_counts[ip][key]["down"]
             if total > 0:
                 node_data[key]["percentage"] = ((total - down) / total) * 100
+                # Round to 2 decimal places
+                node_data[key]["percentage"] = round(node_data[key]["percentage"], 2)
             else:
                 node_data[key]["percentage"] = 100
         node_list.append(node_data)
@@ -586,6 +611,8 @@ def summarize_history(history: list) -> dict:
         down = overall_counts[key]["down"]
         if total > 0:
             overall_status[key]["percentage"] = ((total - down) / total) * 100
+            # Round to 2 decimal places
+            overall_status[key]["percentage"] = round(overall_status[key]["percentage"], 2)
             last_downs = [
                 nodes_status[ip][key]["last_down"]
                 for ip in nodes_status
@@ -602,9 +629,9 @@ def summarize_history(history: list) -> dict:
 def convert_nodes_to_dict(nodes):
     nodes_dict = {}
     for node in nodes:
-        name = node.get("name")
-        if name:
-            nodes_dict[name] = node
+        ip = node.get("ip")
+        if ip:
+            nodes_dict[ip] = node
     return nodes_dict
 
 
@@ -612,6 +639,52 @@ def convert_nodes_to_dict(nodes):
 
 
 # region API routes
+@app.route("/api")
+def api_index():
+    agent = request.headers.get("User-Agent")
+    # Check if the request is not from a browser
+    nonBrowser = ["curl", "Postman", "Insomnia", "httpie", "wget", "python-requests"]
+
+    endpoints = [
+        {"route": "/api/nodes", "description": "Get the current status of all nodes"},
+        {
+            "route": "/api/history",
+            "description": "Get a summary of the last x days of node status",
+            "parameters": [
+                {
+                    "name": "days",
+                    "type": "int",
+                    "description": "Number of days to get the history for",
+                }
+            ],
+        },
+        {
+            "route": "/api/history/<int:days>",
+            "description": "Get a summary of the last x days of node status",
+        },
+        {
+            "route": "/api/full",
+            "description": "Get the full history of node status for the last x days",
+            "parameters": [
+                {
+                    "name": "days",
+                    "type": "int",
+                    "description": "Number of days to get the history for",
+                }
+            ],
+        },
+        {"route": "/api/refresh", "description": "Force a status check of all nodes"},
+    ]
+
+    if any(agent.lower().find(x) != -1 for x in nonBrowser):
+        print("API request", flush=True)
+        return jsonify({"status": "ok", "endpoints": endpoints})
+
+    else:
+        # Redirect to the main page
+        return render_template("api.html",endpoints=endpoints)
+
+
 @app.route("/api/nodes")
 def api_nodes():
     node_status = check_nodes_from_log()
@@ -654,10 +727,12 @@ def api_all():
     history = get_history(history_days)
     return jsonify(history)
 
+
 @app.route("/api/refresh")
 def api_refresh():
     node_status = check_nodes()
     return jsonify(node_status)
+
 
 # endregion
 
@@ -689,9 +764,7 @@ def index():
             node["cert"]["expiry_date"], "%b %d %H:%M:%S %Y GMT"
         )
         if cert_expiry < datetime.now():
-            alerts.append(
-                f"The {node['name']} node's certificate has expired"
-            )
+            alerts.append(f"The {node['name']} node's certificate has expired")
             continue
         elif cert_expiry < datetime.now() + relativedelta.relativedelta(days=7):
             warnings.append(
@@ -710,7 +783,6 @@ def index():
             warnings.append(
                 f"The {node['name']} node's certificate is expiring {format_relative_time(cert_853_expiry)} for DNS over TLS (port 853)"
             )
-        
 
     history_days = 7
     if "history" in request.args:
@@ -720,9 +792,27 @@ def index():
             pass
     history = get_history(history_days)
     history_summary = summarize_history(history)
-    history_summary["nodes"] = convert_nodes_to_dict(history_summary["nodes"])
-    last_check = format_last_check(last_log)
+
+    # Convert time to relative time
+    for node in history_summary["nodes"]:
+        for key in ["plain_dns", "doh", "dot"]:
+            if node[key]["last_down"] == "Never":
+                continue
+            node[key]["last_down"] = format_last_check(
+                datetime.strptime(node[key]["last_down"], "%Y-%m-%d %H:%M:%S")
+            )
     
+    for key in ["plain_dns", "doh", "dot"]:
+        if history_summary["overall"][key]["last_down"] == "Never":
+            continue
+        history_summary["overall"][key]["last_down"] = format_last_check(
+            datetime.strptime(history_summary["overall"][key]["last_down"], "%Y-%m-%d %H:%M:%S")
+        )
+
+    history_summary["nodes"] = convert_nodes_to_dict(history_summary["nodes"])
+
+    last_check = format_last_check(last_log)
+
     # Replace true/false with up/down
     for node in node_status:
         for key in ["plain_dns", "doh", "dot"]:
@@ -730,7 +820,6 @@ def index():
                 node[key] = "Up"
             else:
                 node[key] = "Down"
-
 
     return render_template(
         "index.html",

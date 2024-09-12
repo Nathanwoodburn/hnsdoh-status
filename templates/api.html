@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API | HNS DoH</title>
+    <link rel="icon" href="/assets/img/HNS.png" type="image/png">
+    <link rel="stylesheet" href="/assets/css/api.css">
+</head>
+
+<body>
+    <div class="spacer"></div>
+    <div class="centre">
+        {% if endpoints %}
+        <h1 style="font-size: xx-large;">API Info</h1>
+        <p>Available endpoints:</p>
+        <ul style="width: fit-content;margin: auto;">
+            {% for endpoint in endpoints %}
+            <li class="top">
+                <strong>{{ endpoint.route }}</strong> - {{ endpoint.description }}
+                {% if endpoint.parameters %}
+                <ul>
+                    <li><em>Parameters:</em></li>
+                    {% for param in endpoint.parameters %}
+                    <li>
+                        <strong>{{ param.name }}:</strong>
+                        ({{ param.type }}) - {{ param.description }}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+
+        {% else %}
+        <h1>404 | Page not found</h1>
+        <p>Sorry, the page you are looking for does not exist.</p>
+        <p><a href="/">Go back to the homepage</a></p>
+        {% endif %}
+    </div>
+</body>
+
+</html>
