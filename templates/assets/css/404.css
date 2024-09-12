@@ -1,0 +1,19 @@
+body {
+    background-color: #000000;
+    color: #ffffff;
+}
+.centre {
+    text-align: center;
+    margin-top: 20%;
+}
+a {
+    color: #ffffff;
+}
+a:hover {
+    color: #ff0000;
+}
+h1 {
+    font-size: 100px;
+    margin: 0;
+    padding: 0;
+}
