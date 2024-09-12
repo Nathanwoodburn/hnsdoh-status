@@ -1,0 +1,18 @@
+.node {
+    margin: 25px;
+    border: solid;
+    border-radius: 20px;
+    padding-inline: 50px;
+    max-width: 90%;
+}
+
+.spacer {
+    margin: 25px;
+    display: block;
+}
+.warnings {
+    margin: auto;
+    width: 1000px;
+    max-width: 95%;
+    margin-top: 20px;
+}

@@ -1,3 +1,4 @@
+from collections import defaultdict
 from functools import cache
 import json
 from flask import (
@@ -207,7 +208,6 @@ def verify_cert(ip: str,port:int) -> bool:
         
         # Convert the expiry date string to a datetime object
         expiry_date = datetime.strptime(expiry_date_str, '%b %d %H:%M:%S %Y GMT')
-        print(expiry_date)
         expires = format_relative_time(expiry_date)
         valid = expiry_date > datetime.now()
 
@@ -234,6 +234,52 @@ def format_relative_time(expiry_date: datetime) -> str:
         return f"in {minutes} minutes" if minutes > 1 else "in 1 minute"
     else:
         return f"in {delta.seconds} seconds" if delta.seconds > 1 else "in 1 second"
+    
+def check_nodes() -> list:
+    global nodes
+    if last_log > datetime.now() - relativedelta.relativedelta(minutes=1):
+        # Load the last log
+        with open(f"{log_dir}/node_status.json", "r") as file:
+            data = json.load(file)
+        newest = {"date": datetime.now()-relativedelta.relativedelta(years=1), "nodes": []}
+        for entry in data:
+            if datetime.strptime(entry["date"], "%Y-%m-%d %H:%M:%S") > newest["date"]:
+                newest = entry
+                newest["date"] = datetime.strptime(newest["date"], "%Y-%m-%d %H:%M:%S")
+        node_status = newest["nodes"]
+    else:
+        if len(nodes) == 0:
+            nodes = get_node_list()
+            node_status = []
+            for ip in nodes:
+                node_status.append({
+                    "ip": ip,
+                    "name": node_names[ip] if ip in node_names else ip,
+                    "location": node_locations[ip] if ip in node_locations else "Unknown",
+                    "plain_dns": check_plain_dns(ip),
+                    "doh": check_doh(ip),
+                    "dot": check_dot(ip),
+                    "cert": verify_cert(ip,443),
+                    "cert_853": verify_cert(ip,853)
+                    })
+        else:
+            node_status = []
+            for ip in nodes:
+                node_status.append({
+                    "ip": ip,
+                    "name": node_names[ip] if ip in node_names else ip,
+                    "location": node_locations[ip] if ip in node_locations else "Unknown",
+                    "plain_dns": check_plain_dns(ip),
+                    "doh": check_doh(ip),
+                    "dot": check_dot(ip),
+                    "cert": verify_cert(ip,443),
+                    "cert_853": verify_cert(ip,853)
+                    })
+        # Save the node status to a file
+        log_status(node_status)
+    print("Finished checking nodes", flush=True)
+    return node_status
+
 # endregion
 
 # region File logs
@@ -275,8 +321,128 @@ def log_status(node_status: list):
     with open(filename, "w") as file:
         json.dump(data, file, indent=4)
 
-    
-        
+# endregion    
+# region History functions
+def get_history(days: int) -> list:
+    log_files = [f for f in os.listdir(log_dir) if f.endswith('.json') and f.startswith('node_status')]
+    history = []
+
+    for log_file in log_files:
+        file_path = os.path.join(log_dir, log_file)
+        with open(file_path, 'r') as file:
+            data = json.load(file)
+            for entry in data:
+                entry_date = datetime.strptime(entry["date"], "%Y-%m-%d %H:%M:%S")
+                if datetime.now() - relativedelta.relativedelta(days=days) < entry_date:
+                    history.append(entry)
+    return history
+
+def summarize_history(history: list) -> dict:
+    nodes_status = defaultdict(lambda: {
+        "name": "",
+        "location": "",
+        "plain_dns": {"last_down": "Never", "percentage": 0},
+        "doh": {"last_down": "Never", "percentage": 0},
+        "dot": {"last_down": "Never", "percentage": 0}
+    })
+    overall_status = {
+        "plain_dns": {"last_down": "Never", "percentage": 0},
+        "doh": {"last_down": "Never", "percentage": 0},
+        "dot": {"last_down": "Never", "percentage": 0}
+    }
+
+    # Collect data
+    total_counts = defaultdict(lambda: {
+        "plain_dns": {"down": 0, "total": 0},
+        "doh": {"down": 0, "total": 0},
+        "dot": {"down": 0, "total": 0}
+    })
+
+    for entry in history:
+        date = datetime.strptime(entry["date"], "%Y-%m-%d %H:%M:%S")
+        for node in entry["nodes"]:
+            ip = node["ip"]
+            # Update node details if not already present
+            if nodes_status[ip]["name"] == "":
+                nodes_status[ip]["name"] = node.get("name", "")
+                nodes_status[ip]["location"] = node.get("location", "")
+
+            # Update counts and last downtime
+            for key in ["plain_dns", "doh", "dot"]:
+                status = node.get(key, "up")
+                if status == "down":
+                    total_counts[ip][key]["down"] += 1
+                total_counts[ip][key]["total"] += 1
+
+            # Update last downtime for each key
+            for key in ["plain_dns", "doh", "dot"]:
+                if node.get(key) == "down":
+                    nodes_status[ip][key]["last_down"] = date.strftime("%Y-%m-%d %H:%M:%S")
+
+    # Calculate percentages and prepare final summary
+    node_list = []
+    for ip, status in nodes_status.items():
+        node_data = status.copy()
+        for key in ["plain_dns", "doh", "dot"]:
+            total = total_counts[ip][key]["total"]
+            down = total_counts[ip][key]["down"]
+            if total > 0:
+                node_data[key]["percentage"] = ((total - down) / total) * 100
+            else:
+                node_data[key]["percentage"] = 100
+        node_list.append(node_data)
+
+    # Aggregate overall status
+    overall_counts = {"plain_dns": {"down": 0, "total": 0}, "doh": {"down": 0, "total": 0}, "dot": {"down": 0, "total": 0}}
+    for ip, counts in total_counts.items():
+        for key in ["plain_dns", "doh", "dot"]:
+            overall_counts[key]["total"] += counts[key]["total"]
+            overall_counts[key]["down"] += counts[key]["down"]
+
+    for key in ["plain_dns", "doh", "dot"]:
+        total = overall_counts[key]["total"]
+        down = overall_counts[key]["down"]
+        if total > 0:
+            overall_status[key]["percentage"] = ((total - down) / total) * 100
+            last_downs = [nodes_status[ip][key]["last_down"] for ip in nodes_status if nodes_status[ip][key]["last_down"] != "Never"]
+            if last_downs:
+                overall_status[key]["last_down"] = max(last_downs)
+        else:
+            overall_status[key]["percentage"] = 100
+
+    return {
+        "nodes": node_list,
+        "overall": overall_status,
+        "check_counts": total_counts
+    }
+def convert_nodes_to_dict(nodes):
+    nodes_dict = {}
+    for node in nodes:
+        name = node.get('name')
+        if name:
+            nodes_dict[name] = node
+    return nodes_dict
+
+# endregion
+
+
+# region API routes
+@app.route("/api/nodes")
+def api_nodes():
+    node_status = check_nodes()
+    return jsonify(node_status)
+
+@app.route("/api/history")
+def api_history():
+    history_days = 7
+    if "days" in request.args:
+        try:
+            history_days = int(request.args["days"])
+        except:
+            pass
+    history = get_history(history_days)
+    history_summary = summarize_history(history)
+    return jsonify(history_summary)
 
 # endregion
 
@@ -284,48 +450,8 @@ def log_status(node_status: list):
 # region Main routes
 @app.route("/")
 def index():
-    global nodes
-
-    if last_log > datetime.now() - relativedelta.relativedelta(minutes=1):
-        # Load the last log
-        with open(f"{log_dir}/node_status.json", "r") as file:
-            data = json.load(file)
-        newest = {"date": datetime.now()-relativedelta.relativedelta(years=1), "nodes": []}
-        for entry in data:
-            if datetime.strptime(entry["date"], "%Y-%m-%d %H:%M:%S") > newest["date"]:
-                newest = entry
-                newest["date"] = datetime.strptime(newest["date"], "%Y-%m-%d %H:%M:%S")
-        node_status = newest["nodes"]
-    else:
-        if len(nodes) == 0:
-            nodes = get_node_list()
-            node_status = []
-            for ip in nodes:
-                node_status.append({
-                    "ip": ip,
-                    "name": node_names[ip] if ip in node_names else ip,
-                    "location": node_locations[ip] if ip in node_locations else "Unknown",
-                    "plain_dns": check_plain_dns(ip),
-                    "doh": check_doh(ip),
-                    "dot": check_dot(ip),
-                    "cert": verify_cert(ip,443),
-                    "cert_853": verify_cert(ip,853)
-                    })
-        else:
-            node_status = []
-            for ip in nodes:
-                node_status.append({
-                    "ip": ip,
-                    "name": node_names[ip] if ip in node_names else ip,
-                    "location": node_locations[ip] if ip in node_locations else "Unknown",
-                    "plain_dns": check_plain_dns(ip),
-                    "doh": check_doh(ip),
-                    "dot": check_dot(ip),
-                    "cert": verify_cert(ip,443),
-                    "cert_853": verify_cert(ip,853)
-                    })
-        # Save the node status to a file
-        log_status(node_status)
+    node_status = check_nodes()
+    
 
     warnings = []
     for node in node_status:
@@ -346,7 +472,18 @@ def index():
         if cert_853_expiry < datetime.now() + relativedelta.relativedelta(days=7):
             warnings.append(f"{node['name']} has a certificate expiring in less than 7 days on port 853")
 
-    return render_template("index.html",nodes=node_status,warnings=warnings)
+    history_days = 7
+    if "history" in request.args:
+        try:
+            history_days = int(request.args["history"])
+        except:
+            pass
+    history = get_history(history_days)
+    history_summary = summarize_history(history)
+    history_summary["nodes"] = convert_nodes_to_dict(history_summary["nodes"])
+    last_check = last_log.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"Last check: {last_check}", flush=True)
+    return render_template("index.html",nodes=node_status,warnings=warnings,history=history_summary,last_check=last_check)
 
 
 @app.route("/<path:path>")

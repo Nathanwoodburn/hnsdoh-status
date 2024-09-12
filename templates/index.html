@@ -33,6 +33,7 @@
     <link rel="stylesheet" href="assets/css/bs-theme-overrides.css">
     <link rel="stylesheet" href="assets/css/Navbar-Right-Links-Dark-icons.css">
     <link rel="stylesheet" href="assets/css/Team-images.css">
+    <link rel="stylesheet" href="assets/css/index.css">
 
     <script async src="https://umami.woodburn.au/script.js"
         data-website-id="7e0ed7e4-3858-4124-a574-b57ac05aaad1"></script>
@@ -49,7 +50,7 @@
     <section id="intro">
         <div class="text-center">
             <h1 class="text-center" style="font-size: 60px;">HNS DoH</h1>
-            <div id="warnings" style="margin-top: 20px;">
+            <div class="warnings">
                 <!-- Check if warnings is empty -->
                 {% if warnings %}
                     <div class="alert alert-danger" role="alert">
@@ -65,10 +66,24 @@
     </section>
 
     <section id="status"></section>
-        <div class="text-center">
+        <div class="text-center" style="width: fit-content;margin: auto;max-width: 100%;">
             <h1 class="text-center" style="font-size: 60px;">Nodes</h1>
-            {% for node in nodes %}
+            <span style="font-size: smaller;margin-bottom: 10px;">Last check: {{last_check}}</span>
+            <div class="spacer"></div>
+            <div class="node" style="display: block;">
                 <div>
+                    <h2 style="display: inline;">Overall</h2>
+                </div>
+                <div>
+                    <h5>Stats</h5>
+                    <p>Plain DNS: {{history.overall.plain_dns.percentage}}% uptime (last down {{history.overall.plain_dns.last_down}})</p>
+                    <p>DNS over HTTPS: {{history.overall.doh.percentage}}% uptime (last down {{history.overall.doh.last_down}})</p>
+                    <p>DNS over TLS: {{history.overall.dot.percentage}}% uptime (last down {{history.overall.dot.last_down}})</p>
+                </div>                    
+            </div>    
+            <div class="spacer"></div>
+            {% for node in nodes %}
+                <div class="node">
                     <div>
                         <h2 style="display: inline;">{{node.location}}</h2>
                         <h4 style="display: inline;">({{ node.name }})</h4>
@@ -79,7 +94,13 @@
                         <p>DNS over HTTPS: {{node.doh}}</p>
                         <p>DNS over TLS: {{node.dot}}</p>
                         <p>Certificate: {{node.cert.valid}} (expires {{node.cert.expires}})</p>
-                    </div>                    
+                    </div>
+                    <div>
+                        <h5>Stats</h5>
+                        <p>Plain DNS: {{history.nodes[node.name].plain_dns.percentage}}% uptime (last down {{history.nodes[node.name].plain_dns.last_down}})</p>
+                        <p>DNS over HTTPS: {{history.nodes[node.name].doh.percentage}}% uptime (last down {{history.nodes[node.name].doh.last_down}})</p>
+                        <p>DNS over TLS: {{history.nodes[node.name].dot.percentage}}% uptime (last down {{history.nodes[node.name].dot.last_down}})</p>
+                    </div>
                 </div>        
             
             {% endfor %}
