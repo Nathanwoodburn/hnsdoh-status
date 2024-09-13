@@ -22,3 +22,9 @@
 .node-info > p{
     margin: 0;
 }
+.node.warning {
+    border-color: #FFA500;
+}
+.node.error {
+    border-color: #FF0000;
+}

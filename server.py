@@ -749,28 +749,36 @@ def index():
     alerts = []
     warnings = []
     for node in node_status:
+        node["class"] = "normal"
         if not node["plain_dns"]:
+            node["class"] = "error"
             alerts.append(f"{node['name']} does not support plain DNS")
 
         if not node["doh"]:
+            node["class"] = "error"
             alerts.append(f"{node['name']} does not support DoH")
 
         if not node["dot"]:
+            node["class"] = "error"
             alerts.append(f"{node['name']} does not support DoT")
 
         if not node["cert"]["valid"]:
+            node["class"] = "error"
             alerts.append(f"{node['name']} has an invalid certificate")
 
         if not node["cert_853"]["valid"]:
+            node["class"] = "error"
             alerts.append(f"{node['name']} has an invalid certificate on port 853")
 
         cert_expiry = datetime.strptime(
             node["cert"]["expiry_date"], "%b %d %H:%M:%S %Y GMT"
         )
         if cert_expiry < datetime.now():
+            node["class"] = "error"
             alerts.append(f"The {node['name']} node's certificate has expired")
             continue
         elif cert_expiry < datetime.now() + relativedelta.relativedelta(days=7):
+            node["class"] = "warning"
             warnings.append(
                 f"The {node['name']} node's certificate is expiring {format_relative_time(cert_expiry)}"
             )
@@ -779,11 +787,13 @@ def index():
             node["cert_853"]["expiry_date"], "%b %d %H:%M:%S %Y GMT"
         )
         if cert_853_expiry < datetime.now():
+            node["class"] = "error"
             alerts.append(
                 f"The {node['name']} node's certificate has expired for DNS over TLS (port 853)"
             )
             continue
         elif cert_853_expiry < datetime.now() + relativedelta.relativedelta(days=7):
+            node["class"] = "warning"
             warnings.append(
                 f"The {node['name']} node's certificate is expiring {format_relative_time(cert_853_expiry)} for DNS over TLS (port 853)"
             )
