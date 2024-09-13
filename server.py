@@ -46,6 +46,7 @@ node_locations = {
     "172.105.120.203": "Singapore",
 }
 nodes = []
+manual_nodes = []
 last_log = datetime.now() - relativedelta.relativedelta(years=1)
 
 sent_notifications = {}
@@ -67,6 +68,8 @@ else:
     with open(f"{log_dir}/sent_notifications.json", "r") as file:
         sent_notifications = json.load(file)
 
+if (os.getenv("NODES")):
+    manual_nodes = os.getenv("NODES").split(",")
 
 print(f"Log directory: {log_dir}", flush=True)
 
@@ -131,6 +134,12 @@ def get_node_list() -> list:
     # Print the IP addresses
     for ipval in result:
         ips.append(ipval.to_text())
+
+    # Add manual nodes
+    for node in manual_nodes:
+        if node not in ips:
+            print(f"Adding manual node: {node}", flush=True)
+            ips.append(node)
     return ips
 
 
@@ -220,13 +229,16 @@ def check_dot(ip: str) -> bool:
 
 
 def verify_cert(ip: str, port: int) -> bool:
-    sock = socket.create_connection((ip, port))
-
-    # Wrap the socket in SSL/TLS
-    context = ssl.create_default_context()
-    ssock = context.wrap_socket(sock, server_hostname="hnsdoh.com")
     expires = "ERROR"
+    valid = False
+    expiry_date_str = (datetime.now() - relativedelta.relativedelta(years=1)).strftime("%b %d %H:%M:%S %Y GMT")
     try:
+        sock = socket.create_connection((ip, port))
+        # Wrap the socket in SSL/TLS
+        context = ssl.create_default_context()
+        ssock = context.wrap_socket(sock, server_hostname="hnsdoh.com")
+        
+    
         # Retrieve the server's certificate
         cert = ssock.getpeercert()
 
@@ -237,10 +249,13 @@ def verify_cert(ip: str, port: int) -> bool:
         expiry_date = datetime.strptime(expiry_date_str, "%b %d %H:%M:%S %Y GMT")
         expires = format_relative_time(expiry_date)
         valid = expiry_date > datetime.now()
-
+    except Exception as e:
+        print(e)
+        
     finally:
         # Close the SSL and socket connection
-        ssock.close()
+        if "ssock" in locals():
+            ssock.close()
     return {"valid": valid, "expires": expires, "expiry_date": expiry_date_str}
 
 
