@@ -166,8 +166,9 @@ def build_dns_query(domain: str, qtype: str = "A"):
     return q.pack()
 
 
-def check_doh(ip: str) -> bool:
+def check_doh(ip: str) -> dict:
     status = False
+    server_name = []
     try:
         dns_query = build_dns_query("2.wdbrn", "TXT")
         request = (
@@ -194,6 +195,12 @@ def check_doh(ip: str) -> bool:
         response_str = response_data.decode("latin-1")
         headers, body = response_str.split("\r\n\r\n", 1)
 
+        # Try to get server from headers
+        for header in headers.split("\r\n"):
+            if header.startswith("Server:"):
+                server_name.append(header.split(":")[1].strip())
+        
+
         dns_response: dnslib.DNSRecord = dnslib.DNSRecord.parse(body.encode("latin-1"))
         for rr in dns_response.rr:
             if "Test 2" in str(rr):
@@ -207,7 +214,7 @@ def check_doh(ip: str) -> bool:
         # Check if ssock is defined
         if "ssock" in locals():
             ssock.close()
-    return status
+    return {"status": status, "server": server_name}
 
 
 def check_dot(ip: str) -> bool:
@@ -217,6 +224,7 @@ def check_dot(ip: str) -> bool:
         response = dns.query.tls(
             q, ip, timeout=5, port=853, server_hostname="hnsdoh.com"
         )
+        print(response, flush=True)
         if response.rcode() == dns.rcode.NOERROR:
             for rrset in response.answer:
                 for rr in rrset:
@@ -323,7 +331,8 @@ def check_nodes() -> list:
                             node_locations[ip] if ip in node_locations else "Unknown"
                         ),
                         "plain_dns": check_plain_dns(ip),
-                        "doh": check_doh(ip),
+                        "doh": check_doh(ip)["status"],
+                        "doh_server": check_doh(ip)["server"],
                         "dot": check_dot(ip),
                         "cert": verify_cert(ip, 443),
                         "cert_853": verify_cert(ip, 853),
@@ -340,7 +349,8 @@ def check_nodes() -> list:
                             node_locations[ip] if ip in node_locations else "Unknown"
                         ),
                         "plain_dns": check_plain_dns(ip),
-                        "doh": check_doh(ip),
+                        "doh": check_doh(ip)["status"],
+                        "doh_server": check_doh(ip)["server"],
                         "dot": check_dot(ip),
                         "cert": verify_cert(ip, 443),
                         "cert_853": verify_cert(ip, 853),
