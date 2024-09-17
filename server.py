@@ -101,8 +101,6 @@ def send_report(path):
     ):
         if os.path.isfile("templates/assets/img/" + filename):
             return send_from_directory("templates/assets/img", filename)
-        if os.path.isfile("templates/assets/img/favicon/" + filename):
-            return send_from_directory("templates/assets/img/favicon", filename)
 
     return render_template("404.html"), 404
 
@@ -868,6 +866,14 @@ def index():
         history=history_summary,
         last_check=last_check,
     )
+
+
+@app.route("/manifest.json")
+def manifest():
+    with open("templates/manifest.json", "r") as file:
+        manifest = json.load(file)
+    manifest["start_url"] = request.url_root
+    return jsonify(manifest)
 
 
 @app.route("/<path:path>")

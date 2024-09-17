@@ -1,0 +1,15 @@
+{
+    "name": "HNSDoH Status",
+    "short_name": "HNSDoH Status",
+    "start_url": "https://{{host}}/",
+    "display": "standalone",
+    "background_color": "#212529",
+    "theme_color": "#212529",
+    "orientation": "portrait-primary",
+    "icons": [
+      {
+        "src": "/favicon.png",
+        "sizes": "500x500"
+      }
+    ]
+  }
