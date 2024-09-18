@@ -222,7 +222,6 @@ def check_dot(ip: str) -> bool:
         response = dns.query.tls(
             q, ip, timeout=5, port=853, server_hostname="hnsdoh.com"
         )
-        print(response, flush=True)
         if response.rcode() == dns.rcode.NOERROR:
             for rrset in response.answer:
                 for rr in rrset:
