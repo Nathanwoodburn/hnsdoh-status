@@ -820,7 +820,7 @@ def index():
                 f"The {node['name']} node's certificate is expiring {format_relative_time(cert_853_expiry)} for DNS over TLS (port 853)"
             )
 
-    history_days = 7
+    history_days = 30
     if "history" in request.args:
         try:
             history_days = int(request.args["history"])
@@ -833,10 +833,11 @@ def index():
     for node in history_summary["nodes"]:
         for key in ["plain_dns", "doh", "dot"]:
             if node[key]["last_down"] == "Never":
-                continue
-            node[key]["last_down"] = format_last_check(
-                datetime.strptime(node[key]["last_down"], "%Y-%m-%d %H:%M:%S")
-            )
+                node[key]["last_down"] = "over 30 days ago"
+            else:
+                node[key]["last_down"] = format_last_check(
+                    datetime.strptime(node[key]["last_down"], "%Y-%m-%d %H:%M:%S")
+                )
     
     for key in ["plain_dns", "doh", "dot"]:
         if history_summary["overall"][key]["last_down"] == "Never":
