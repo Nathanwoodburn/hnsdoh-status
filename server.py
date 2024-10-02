@@ -819,34 +819,6 @@ def api_errors():
                 f"The {node['name']} node's certificate is expiring {format_relative_time(cert_853_expiry)} for DNS over TLS (port 853)"
             )
 
-    history_days = 30
-    if "history" in request.args:
-        try:
-            history_days = int(request.args["history"])
-        except:
-            pass
-    history = get_history(history_days)
-    history_summary = summarize_history(history)
-
-    # Convert time to relative time
-    for node in history_summary["nodes"]:
-        for key in ["plain_dns", "doh", "dot"]:
-            if node[key]["last_down"] == "Never":
-                node[key]["last_down"] = "over 30 days ago"
-            else:
-                node[key]["last_down"] = format_last_check(
-                    datetime.strptime(node[key]["last_down"], "%Y-%m-%d %H:%M:%S")
-                )
-    
-    for key in ["plain_dns", "doh", "dot"]:
-        if history_summary["overall"][key]["last_down"] == "Never":
-            continue
-        history_summary["overall"][key]["last_down"] = format_last_check(
-            datetime.strptime(history_summary["overall"][key]["last_down"], "%Y-%m-%d %H:%M:%S")
-        )
-
-    history_summary["nodes"] = convert_nodes_to_dict(history_summary["nodes"])
-
     last_check = format_last_check(last_log)
 
     # Convert alerts and warnings to a string
@@ -861,6 +833,25 @@ def api_errors():
     if (len(alerts) == 0) and (len(warnings) == 0):
         status_string = "HNSDoH is up and running!"
 
+    # Get nodes down
+    nodes = len(node_status)
+    down_nodes = 0
+    for node in node_status:
+        if not node["plain_dns"]:
+            down_nodes += 1
+            continue
+        if not node["doh"]:
+            down_nodes += 1
+            continue
+        if not node["dot"]:
+            down_nodes += 1
+            continue
+        if not node["cert"]["valid"]:
+            down_nodes += 1
+            continue
+        if not node["cert_853"]["valid"]:
+            down_nodes += 1
+
     return jsonify({
         "warnings": warnings,
         "warnings_string": warning_string,
@@ -868,6 +859,9 @@ def api_errors():
         "alerts_string": alert_string,
         "last_check": last_check,
         "status_string": status_string,
+        "up": nodes - down_nodes,
+        "down": down_nodes,
+        "total": nodes,
     })
 
 
