@@ -37,6 +37,7 @@ node_names = {
     "194.50.5.27": "Nathan.Woodburn/",
     "139.177.195.185": "HNSCanada",
     "172.105.120.203": "EZ Domains",
+    "173.233.72.88": "Zorro"
 }
 node_locations = {
     "18.169.98.42": "England",
@@ -44,6 +45,7 @@ node_locations = {
     "194.50.5.27": "Australia",
     "139.177.195.185": "Canada",
     "172.105.120.203": "Singapore",
+    "173.233.72.88": "United States"
 }
 nodes = []
 manual_nodes = []
