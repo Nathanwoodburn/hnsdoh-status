@@ -115,7 +115,6 @@ def faviconPNG():
 
 @app.route("/.well-known/<path:path>")
 def wellknown(path):
-    # Try to proxy to https://nathan.woodburn.au/.well-known/
     req = requests.get(f"https://nathan.woodburn.au/.well-known/{path}")
     return make_response(
         req.content, 200, {"Content-Type": req.headers["Content-Type"]}
@@ -140,6 +139,8 @@ def get_node_list() -> list:
         if node not in ips:
             print(f"Adding manual node: {node}", flush=True)
             ips.append(node)
+        else:
+            print(f"Skipping manual node: {node}", flush=True)
     return ips
 
 
@@ -535,6 +536,7 @@ def log_status(node_status: list):
 
     with open(filename, "w") as file:
         json.dump(data, file, indent=4)
+    print("Logged status", flush=True)
 
 
 # endregion
@@ -604,9 +606,11 @@ def summarize_history(history: list) -> dict:
             # Update last downtime for each key
             for key in ["plain_dns", "doh", "dot"]:
                 if node.get(key) == False:
-                    nodes_status[ip][key]["last_down"] = date.strftime(
-                        "%Y-%m-%d %H:%M:%S"
-                    )
+                    # Check if the last downtime is more recent
+                    if nodes_status[ip][key]["last_down"] == "Never":
+                        nodes_status[ip][key]["last_down"] = date.strftime("%Y-%m-%d %H:%M:%S")
+                    elif date > datetime.strptime(nodes_status[ip][key]["last_down"], "%Y-%m-%d %H:%M:%S"):
+                        nodes_status[ip][key]["last_down"] = date.strftime("%Y-%m-%d %H:%M:%S")
 
     # Calculate percentages and prepare final summary
     node_list = []
