@@ -936,6 +936,17 @@ def api_index():
         {
             "route": "/api/latest",
             "description": "Get the latest status of all nodes",
+        },
+        {
+            "route": "/api/check/<ip>",
+            "description": "Check the status of a specific node",
+            "parameters": [
+                {
+                    "name": "ip",
+                    "type": "string",
+                    "description": "IP address of the node to check",
+                }
+            ],
         }
     ]
 
@@ -1104,7 +1115,35 @@ def api_errors():
         "total": nodes,
     })
 
+@app.route("/api/check/<ip>")
+@cache.cached(timeout=30)  # Cache for 30 seconds
+def api_check(ip: str):
+    logger.info(f"Checking node {ip}")
+    data = {
+        "ip": ip,
+        "name": node_names[ip] if ip in node_names else ip,
+        "location": node_locations[ip] if ip in node_locations else "Unknown",
+        "plain_dns": False,
+        "doh": False,
+        "doh_server": [],
+        "dot": False,
+        "cert": {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"},
+        "cert_853": {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"},
+    }
+    try:
+        data["plain_dns"] = check_plain_dns(ip)
+        doh = check_doh(ip)
+        data["doh"] = doh["status"]
+        data["doh_server"] = doh["server"]
+        data["dot"] = check_dot(ip)
+        data["cert"] = verify_cert(ip, 443)
+        data["cert_853"] = verify_cert(ip, 853)
+        logger.info(f"Node {ip} check complete")
+    except Exception as e:
+        logger.error(f"Error checking node {ip}: {e}")
 
+    logger.info("Finished checking nodes")
+    return jsonify(data)    
 # endregion
 
 
