@@ -6,3 +6,4 @@ dnslib
 python-dateutil
 python-dotenv
 schedule
+apscheduler>=3.9.1
