@@ -61,10 +61,10 @@ scheduler = BackgroundScheduler(daemon=True, job_defaults={'coalesce': True, 'ma
 
 node_names = {
     "18.169.98.42": "Easy HNS",
-    "172.233.46.92": "EZ Domains",
+    "172.233.46.92": "Nathan.Woodburn/",
     "194.50.5.27": "Nathan.Woodburn/",
     "139.177.195.185": "HNSCanada",
-    "172.105.120.203": "EZ Domains",
+    "172.105.120.203": "Nathan.Woodburn/",
     "173.233.72.88": "Zorro"
 }
 node_locations = {
