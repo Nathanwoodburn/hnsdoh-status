@@ -38,10 +38,21 @@ import functools
 import io
 import brotli
 from io import BytesIO
+import concurrent.futures
+from threading import Lock
 
 # Set up logging BEFORE attempting imports that might fail
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Set up ThreadPoolExecutor for parallel node checking
+# Use a reasonable number of workers based on CPU cores
+node_check_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=min(32, os.cpu_count() * 4)  # Max 32 workers or 4x CPU cores
+)
+
+# Create a lock for thread safety when updating cache
+cache_lock = Lock()
 
 dotenv.load_dotenv()
 
@@ -207,7 +218,9 @@ def retry(max_attempts=3, delay_seconds=1):
             while attempts < max_attempts:
                 try:
                     return func(*args, **kwargs)
-                except (socket.timeout, socket.error, dns.exception.Timeout, requests.exceptions.RequestException) as e:
+                except (socket.timeout, socket.error, dns.exception.Timeout, 
+                        requests.exceptions.RequestException, ConnectionRefusedError,
+                        ConnectionResetError, OSError, ssl.SSLError) as e:
                     attempts += 1
                     last_error = e
                     logger.warning(f"Attempt {attempts} failed with error: {e} - retrying in {delay_seconds} seconds")
@@ -219,12 +232,13 @@ def retry(max_attempts=3, delay_seconds=1):
     return decorator
 
 
+# Optimize socket timeout settings
 @retry(max_attempts=3, delay_seconds=2)
 def check_plain_dns(ip: str) -> bool:
     resolver = dns.resolver.Resolver()
     resolver.nameservers = [ip]
-    resolver.timeout = 5  # Set a reasonable timeout
-    resolver.lifetime = 5  # Total timeout for the query
+    resolver.timeout = 3  # Reduced from 5 seconds to 3 seconds
+    resolver.lifetime = 3  # Reduced from 5 seconds to 3 seconds
 
     try:
         result = resolver.resolve("1.wdbrn", "TXT")
@@ -273,13 +287,13 @@ def check_doh(ip: str) -> dict:
         )
         wireframe_request = request.encode() + dns_query
         
-        # Create socket with timeout
-        sock = socket.create_connection((ip, 443), timeout=10)
+        # Create socket with reduced timeout
+        sock = socket.create_connection((ip, 443), timeout=5)  # Reduced from 10 to 5 seconds
         context = ssl.create_default_context()
         context.check_hostname = False  # Skip hostname verification for IP-based connection
         ssock = context.wrap_socket(sock, server_hostname="hnsdoh.com")
 
-        ssock.settimeout(10)  # Set a timeout for socket operations
+        ssock.settimeout(5)  # Reduced from 10 to 5 seconds
         ssock.sendall(wireframe_request)
         
         response_data = b""
@@ -354,7 +368,7 @@ def check_dot(ip: str) -> bool:
     q = dns.message.make_query(qname, dns.rdatatype.TXT)
     try:
         response = dns.query.tls(
-            q, ip, timeout=5, port=853, server_hostname="hnsdoh.com"
+            q, ip, timeout=3, port=853, server_hostname="hnsdoh.com"  # Reduced from 5 to 3 seconds
         )
         if response.rcode() == dns.rcode.NOERROR:
             for rrset in response.answer:
@@ -382,12 +396,12 @@ def verify_cert(ip: str, port: int) -> dict:
     ssock = None
     
     try:
-        sock = socket.create_connection((ip, port), timeout=10)
+        sock = socket.create_connection((ip, port), timeout=5)  # Reduced from 10 to 5 seconds
         # Wrap the socket in SSL/TLS
         context = ssl.create_default_context()
         context.check_hostname = False  # Skip hostname verification for IP-based connection
         ssock = context.wrap_socket(sock, server_hostname="hnsdoh.com")
-        ssock.settimeout(10)  # Set timeout for socket operations
+        ssock.settimeout(5)  # Reduced from 10 to 5 seconds
     
         # Retrieve the server's certificate
         cert = ssock.getpeercert()
@@ -469,7 +483,7 @@ def format_last_check(last_log: datetime) -> str:
 
 
 def check_nodes() -> list:
-    global nodes
+    global nodes, _node_status_cache, _node_status_cache_time
     if last_log > datetime.now() - relativedelta.relativedelta(minutes=1):
         # Load the last log
         with open(f"{log_dir}/node_status.json", "r") as file:
@@ -487,53 +501,43 @@ def check_nodes() -> list:
         if len(nodes) == 0:
             nodes = get_node_list()
             
+        # Use ThreadPoolExecutor to check nodes in parallel
+        futures = {}
         node_status = []
+        
+        # Submit all node checks to the executor
         for ip in nodes:
-            logger.info(f"Checking node {ip}")
+            futures[node_check_executor.submit(check_single_node, ip)] = ip
+        
+        # Collect results as they complete
+        for future in concurrent.futures.as_completed(futures):
+            ip = futures[future]
             try:
-                plain_dns_result = check_plain_dns(ip)
-                doh_check = check_doh(ip)
-                dot_result = check_dot(ip)
-                cert_result = verify_cert(ip, 443)
-                cert_853_result = verify_cert(ip, 853)
-                
-                node_status.append(
-                    {
-                        "ip": ip,
-                        "name": node_names[ip] if ip in node_names else ip,
-                        "location": (
-                            node_locations[ip] if ip in node_locations else "Unknown"
-                        ),
-                        "plain_dns": plain_dns_result,
-                        "doh": doh_check["status"],
-                        "doh_server": doh_check["server"],
-                        "dot": dot_result,
-                        "cert": cert_result,
-                        "cert_853": cert_853_result,
-                    }
-                )
-                logger.info(f"Node {ip} check complete")
+                node_result = future.result()
+                node_status.append(node_result)
             except Exception as e:
-                logger.error(f"Error checking node {ip}: {e}")
-                # Add a failed entry for this node to ensure it's still included
-                node_status.append(
-                    {
-                        "ip": ip,
-                        "name": node_names[ip] if ip in node_names else ip,
-                        "location": (
-                            node_locations[ip] if ip in node_locations else "Unknown"
-                        ),
-                        "plain_dns": False,
-                        "doh": False,
-                        "doh_server": [],
-                        "dot": False,
-                        "cert": {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"},
-                        "cert_853": {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"},
-                    }
-                )
+                logger.error(f"Error processing results for node {ip}: {e}")
+                # Ensure a failed node entry is still included
+                node_status.append({
+                    "ip": ip,
+                    "name": node_names[ip] if ip in node_names else ip,
+                    "location": (node_locations[ip] if ip in node_locations else "Unknown"),
+                    "plain_dns": False,
+                    "doh": False,
+                    "doh_server": [],
+                    "dot": False,
+                    "cert": {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"},
+                    "cert_853": {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"},
+                })
                 
         # Save the node status to a file
         log_status(node_status)
+        
+        # Update the in-memory cache with thread safety
+        with cache_lock:
+            _node_status_cache = node_status
+            _node_status_cache_time = datetime.now()
+            
     logger.info("Finished checking nodes")
 
     # Send notifications if any nodes are down
@@ -567,155 +571,83 @@ def check_nodes() -> list:
     return node_status
 
 
-# Optimize check_nodes_from_log function with in-memory caching
-def check_nodes_from_log() -> list:
-    global last_log, _node_status_cache, _node_status_cache_time
-    
-    # Check if we have a valid cache
-    current_time = datetime.now()
-    staleness_threshold_str = os.getenv("STALENESS_THRESHOLD_MINUTES", "15")
-    
+def check_single_node(ip):
+    """Check a single node and return its status."""
+    logger.info(f"Checking node {ip}")
     try:
-        staleness_threshold = int(staleness_threshold_str)
-    except ValueError:
-        logger.warning(f"Invalid STALENESS_THRESHOLD_MINUTES value: {staleness_threshold_str}")
-        staleness_threshold = 15
-    
-    # Use in-memory cache if it's fresh enough
-    if (_node_status_cache is not None and _node_status_cache_time is not None and 
-            current_time < _node_status_cache_time + relativedelta.relativedelta(minutes=staleness_threshold/2)):
-        logger.info(f"Using in-memory cache from {format_last_check(_node_status_cache_time)}")
-        return _node_status_cache
-    
-    # Otherwise load from disk or run a new check
-    try:
-        with open(f"{log_dir}/node_status.json", "r") as file:
-            data = json.load(file)
+        # Add timeout handling for individual checks
+        plain_dns_result = False
+        doh_result = {"status": False, "server": []}
+        dot_result = False
+        cert_result = {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"}
+        cert_853_result = {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"}
         
-        newest = {
-            "date": datetime.now() - relativedelta.relativedelta(years=1),
-            "nodes": [],
+        # Use timeout to limit time spent on each check
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_plain_dns = executor.submit(check_plain_dns, ip)
+            future_doh = executor.submit(check_doh, ip)
+            future_dot = executor.submit(check_dot, ip)
+            future_cert = executor.submit(verify_cert, ip, 443)
+            future_cert_853 = executor.submit(verify_cert, ip, 853)
+            
+            # Collect results with timeout
+            try:
+                plain_dns_result = future_plain_dns.result(timeout=5)
+            except (concurrent.futures.TimeoutError, Exception) as e:
+                logger.warning(f"Plain DNS check timed out for {ip}: {str(e)}")
+                
+            try:
+                doh_result = future_doh.result(timeout=5)
+            except (concurrent.futures.TimeoutError, Exception) as e:
+                logger.warning(f"DoH check timed out for {ip}: {str(e)}")
+                
+            try:
+                dot_result = future_dot.result(timeout=5)
+            except (concurrent.futures.TimeoutError, Exception) as e:
+                logger.warning(f"DoT check timed out for {ip}: {str(e)}")
+                
+            try:
+                cert_result = future_cert.result(timeout=5)
+            except (concurrent.futures.TimeoutError, Exception) as e:
+                logger.warning(f"Cert check timed out for {ip}: {str(e)}")
+                
+            try:
+                cert_853_result = future_cert_853.result(timeout=5)
+            except (concurrent.futures.TimeoutError, Exception) as e:
+                logger.warning(f"Cert 853 check timed out for {ip}: {str(e)}")
+        
+        node_status = {
+            "ip": ip,
+            "name": node_names[ip] if ip in node_names else ip,
+            "location": (
+                node_locations[ip] if ip in node_locations else "Unknown"
+            ),
+            "plain_dns": plain_dns_result,
+            "doh": doh_result["status"],
+            "doh_server": doh_result["server"],
+            "dot": dot_result,
+            "cert": cert_result,
+            "cert_853": cert_853_result,
         }
-        
-        for entry in data:
-            if datetime.strptime(entry["date"], "%Y-%m-%d %H:%M:%S") > newest["date"]:
-                newest = entry
-                newest["date"] = datetime.strptime(newest["date"], "%Y-%m-%d %H:%M:%S")
-        
-        node_status = newest["nodes"]
-        
-        if current_time > newest["date"] + relativedelta.relativedelta(minutes=staleness_threshold):
-            logger.warning(f"Data is stale (older than {staleness_threshold} minutes), triggering immediate check")
-            node_status = check_nodes()
-        else:
-            last_log = newest["date"]
-            logger.info(f"Using cached node status from {format_last_check(last_log)}")
-        
-        # Update the in-memory cache
-        _node_status_cache = node_status
-        _node_status_cache_time = current_time
-        
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        logger.error(f"Error reading node status file: {e}")
-        logger.info("Running initial node check")
-        node_status = check_nodes()
-        
-        # Update the in-memory cache
-        _node_status_cache = node_status
-        _node_status_cache_time = current_time
-    
-    return node_status
-
-
-def send_notification(title, description, author):
-    discord_hook = os.getenv("DISCORD_HOOK")
-    if discord_hook:
-        data = {
-            "content": "",
-            "embeds": [
-                {
-                    "title": title,
-                    "description": description,
-                    "url": "https://status.hnsdoh.com",
-                    "color": 5814783,
-                    "author": {
-                        "name": author,
-                        "icon_url": "https://status.hnsdoh.com/favicon.png",
-                    },
-                }
-            ],
-            "username": "HNSDoH",
-            "avatar_url": "https://status.hnsdoh.com/favicon.png",
-            "attachments": [],
+        logger.info(f"Node {ip} check complete")
+        return node_status
+    except Exception as e:
+        logger.error(f"Error checking node {ip}: {e}")
+        # Add a failed entry for this node to ensure it's still included
+        return {
+            "ip": ip,
+            "name": node_names[ip] if ip in node_names else ip,
+            "location": (
+                node_locations[ip] if ip in node_locations else "Unknown"
+            ),
+            "plain_dns": False,
+            "doh": False,
+            "doh_server": [],
+            "dot": False,
+            "cert": {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"},
+            "cert_853": {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"},
         }
-        response = requests.post(discord_hook, json=data)
-        print("Sent notification", flush=True)
-    else:
-        print("No discord hook", flush=True)
 
-
-def send_down_notification(node):
-    global sent_notifications
-
-    # Check if a notification has already been sent
-    if node["ip"] not in sent_notifications:
-        sent_notifications[node["ip"]] = datetime.strftime(
-            datetime.now(), "%Y-%m-%d %H:%M:%S"
-        )
-    else:
-        last_send = datetime.strptime(
-            sent_notifications[node["ip"]], "%Y-%m-%d %H:%M:%S"
-        )
-
-        if last_send > datetime.now() - relativedelta.relativedelta(hours=1):
-            print(
-                f"Notification already sent for {node['name']} in the last hr",
-                flush=True,
-            )
-            return
-
-        # Only send certain notifications once per day
-        if node["plain_dns"] and node["doh"] and node["dot"]:
-            if last_send > datetime.now() - relativedelta.relativedelta(days=1):
-                print(
-                    f"Notification already sent for {node['name']} in the last day",
-                    flush=True,
-                )
-                return
-
-    # Save the notification to the file
-    sent_notifications[node["ip"]] = datetime.strftime(
-        datetime.now(), "%Y-%m-%d %H:%M:%S"
-    )
-    with open(f"{log_dir}/sent_notifications.json", "w") as file:
-        json.dump(sent_notifications, file, indent=4)
-
-    title = f"{node['name']} is down"
-
-    description = f"{node['name']} ({node['ip']}) is down with the following issues:\n"
-    if not node["plain_dns"]:
-        description += "- Plain DNS is down\n"
-    if not node["doh"]:
-        description += "- DoH is down\n"
-    if not node["dot"]:
-        description += "- DoT is down\n"
-    if not node["cert"]["valid"]:
-        description += "- Certificate on port 443 is invalid\n"
-    if not node["cert_853"]["valid"]:
-        description += "- Certificate on port 853 is invalid\n"
-
-    if node["plain_dns"] and node["doh"] and node["dot"]:
-        if node["cert"]["valid"] and node["cert_853"]["valid"]:
-            description = f"The certificate on {node['name']} ({node['ip']}) is expiring soon\n"
-            title = f"{node['name']} certificate is expiring soon"
-        # Also add the expiry date of the certificates
-        description += "\nCertificate expiry dates:\n"
-        description += f"- Certificate on port 443 expires {node['cert']['expires']}\n"
-        description += f"- Certificate on port 853 expires {node['cert_853']['expires']}\n"
-    send_notification(title, description, node["name"])
-
-
-# endregion
 
 # region File logs
 
@@ -786,9 +718,9 @@ def create_default_node_dict():
         "name": "",
         "location": "",
         "ip": "",
-        "plain_dns": {"last_down": "Never", "percentage": 0},
-        "doh": {"last_down": "Never", "percentage": 0},
-        "dot": {"last_down": "Never", "percentage": 0},
+        "plain_dns": {"last_down": "never", "percentage": 0},
+        "doh": {"last_down": "never", "percentage": 0},
+        "dot": {"last_down": "never", "percentage": 0},
     }
 
 def create_default_counts_dict():
@@ -804,9 +736,9 @@ def summarize_history(history: list) -> dict:
     nodes_status = defaultdict(create_default_node_dict)
     
     overall_status = {
-        "plain_dns": {"last_down": "Never", "percentage": 0},
-        "doh": {"last_down": "Never", "percentage": 0},
-        "dot": {"last_down": "Never", "percentage": 0},
+        "plain_dns": {"last_down": "never", "percentage": 0},
+        "doh": {"last_down": "never", "percentage": 0},
+        "dot": {"last_down": "never", "percentage": 0},
     }
 
     # Collect data
@@ -834,7 +766,7 @@ def summarize_history(history: list) -> dict:
             for key in ["plain_dns", "doh", "dot"]:
                 if node.get(key) == False:
                     # Check if the last downtime is more recent
-                    if nodes_status[ip][key]["last_down"] == "Never":
+                    if nodes_status[ip][key]["last_down"] == "never":
                         nodes_status[ip][key]["last_down"] = date.strftime("%Y-%m-%d %H:%M:%S")
                     elif date > datetime.strptime(nodes_status[ip][key]["last_down"], "%Y-%m-%d %H:%M:%S"):
                         nodes_status[ip][key]["last_down"] = date.strftime("%Y-%m-%d %H:%M:%S")
@@ -875,7 +807,7 @@ def summarize_history(history: list) -> dict:
             last_downs = [
                 nodes_status[ip][key]["last_down"]
                 for ip in nodes_status
-                if nodes_status[ip][key]["last_down"] != "Never"
+                if nodes_status[ip][key]["last_down"] != "never"
             ]
             if last_downs:
                 overall_status[key]["last_down"] = max(last_downs)
@@ -961,7 +893,7 @@ def api_index():
 
 # Cache node status for API requests
 @app.route("/api/nodes")
-@cache.cached(timeout=60)  # Cache for 1 minute
+@cache.cached(timeout=300)  # Increased from 60s to 5 minutes
 def api_nodes():
     node_status = check_nodes_from_log()
     return jsonify(node_status)
@@ -1118,6 +1050,14 @@ def api_errors():
 @app.route("/api/check/<ip>")
 @cache.cached(timeout=30)  # Cache for 30 seconds
 def api_check(ip: str):
+    # Verify IP is one of the nodes
+    global nodes
+    if not nodes:
+        return jsonify({"error": "No nodes available"}), 404
+    if ip not in nodes:
+        return jsonify({"error": f"Node {ip} not found"}), 404
+
+
     logger.info(f"Checking node {ip}")
     data = {
         "ip": ip,
@@ -1150,8 +1090,19 @@ def api_check(ip: str):
 # region Main routes
 # Cache the main page rendering
 @app.route("/")
-@cache.cached(timeout=60, query_string=True)  # Cache for 1 minute, respect query params 
+@cache.cached(timeout=120, query_string=True)  # Increased from 60s to 2 minutes
 def index():
+    # Check for fast_load parameter to provide a quicker initial page load
+    fast_load = request.args.get('fast_load', 'false').lower() == 'true'
+    
+    if fast_load:
+        # Return a minimal template that will load data via JavaScript
+        return render_template(
+            "index_fast.html",
+            api_url=request.url_root + "api"
+        )
+    
+    # Original slower but complete load
     node_status = check_nodes_from_log()
 
     alerts = []
@@ -1218,7 +1169,7 @@ def index():
     # Convert time to relative time
     for node in history_summary["nodes"]:
         for key in ["plain_dns", "doh", "dot"]:
-            if node[key]["last_down"] == "Never":
+            if node[key]["last_down"] == "never":
                 node[key]["last_down"] = "over 30 days ago"
             else:
                 node[key]["last_down"] = format_last_check(
@@ -1226,7 +1177,7 @@ def index():
                 )
     
     for key in ["plain_dns", "doh", "dot"]:
-        if history_summary["overall"][key]["last_down"] == "Never":
+        if history_summary["overall"][key]["last_down"] == "never":
             continue
         history_summary["overall"][key]["last_down"] = format_last_check(
             datetime.strptime(history_summary["overall"][key]["last_down"], "%Y-%m-%d %H:%M:%S")
@@ -1307,20 +1258,16 @@ def scheduled_node_check():
         global nodes, _node_status_cache, _node_status_cache_time
         nodes = []  # Reset node list to force refresh
         
-        # Run the check and update in-memory cache
+        # Run the check (which now uses ThreadPoolExecutor)
         node_status = check_nodes()
-        _node_status_cache = node_status
-        _node_status_cache_time = datetime.now()
-        
         # Clear relevant caches
         cache.delete_memoized(api_nodes)
         cache.delete_memoized(api_errors)
         cache.delete_memoized(index)
-        
         logger.info("Completed scheduled node check and updated caches")
     except Exception as e:
         logger.error(f"Error in scheduled node check: {e}")
-
+        
 def scheduler_listener(event):
     """Listener for scheduler events"""
     if event.exception:
@@ -1339,7 +1286,6 @@ def start_scheduler():
         check_interval = 5
 
     logger.info(f"Setting up scheduler to run every {check_interval} minutes")
-    
     # Add the job to the scheduler
     scheduler.add_job(
         scheduled_node_check,
@@ -1347,10 +1293,9 @@ def start_scheduler():
         id='node_check_job',
         replace_existing=True
     )
-    
+    logger.info(f"Setting up scheduler to run every {check_interval} minutes")
     # Add listener for job events
     scheduler.add_listener(scheduler_listener, EVENT_JOB_ERROR | EVENT_JOB_EXECUTED)
-    
     # Start the scheduler if it's not already running
     if not scheduler.running:
         scheduler.start()
@@ -1363,10 +1308,6 @@ def signal_handler(sig, frame):
         scheduler.shutdown()
         logger.info("Scheduler shut down")
     sys.exit(0)
-
-# Register the signal handlers for Docker
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
 
 # Initialize the scheduler when the app starts without relying on @before_first_request
 # which is deprecated in newer Flask versions
@@ -1388,32 +1329,26 @@ def add_compression(response):
             'Content-Encoding' in response.headers or
             response.direct_passthrough):
         return response
-    
     # Only compress specific MIME types
     content_type = response.headers.get('Content-Type', '')
     compressible_types = [
         'text/html', 
         'text/css', 
         'text/plain', 
-        'application/javascript', 
+        'application/javascript',
         'application/json',
         'application/xml',
         'text/xml'
     ]
-    
     if not any(t in content_type for t in compressible_types):
         return response
-    
     accept_encoding = request.headers.get('Accept-Encoding', '')
-    
     if 'br' in accept_encoding:
         try:
             # Get the response content
             response_data = response.get_data()
-            
             # Compress with Brotli
             compressed_data = brotli.compress(response_data, quality=6)
-            
             # Only apply Brotli if it results in smaller size
             if len(compressed_data) < len(response_data):
                 response.set_data(compressed_data)
@@ -1422,10 +1357,163 @@ def add_compression(response):
         except Exception as e:
             logger.warning(f"Brotli compression failed: {e}")
             # If compression fails, we just return the uncompressed response
-    
+            
     return response
 
+def check_nodes_from_log():
+    """Read the most recent node status from the log file."""
+    global _node_status_cache, _node_status_cache_time
+    
+    # Return cached result if it's less than 2 minutes old (increased from 60s)
+    with cache_lock:
+        if _node_status_cache is not None and _node_status_cache_time is not None:
+            if (datetime.now() - _node_status_cache_time).total_seconds() < 120:
+                logger.debug("Using cached node status")
+                return _node_status_cache
+    
+    try:
+        # Load the last log
+        with open(f"{log_dir}/node_status.json", "r") as file:
+            data = json.load(file)
+        
+        newest = {
+            "date": datetime.now() - relativedelta.relativedelta(years=1),
+            "nodes": [],
+        }
+        
+        for entry in data:
+            entry_date = datetime.strptime(entry["date"], "%Y-%m-%d %H:%M:%S")
+            if entry_date > newest["date"]:
+                newest = entry
+                newest["date"] = entry_date
+        
+        # Update the cache
+        with cache_lock:
+            _node_status_cache = newest["nodes"]
+            _node_status_cache_time = datetime.now()
+        
+        return newest["nodes"]
+    except Exception as e:
+        logger.error(f"Error reading node status from log: {e}")
+        # If we can't read from the log, run a fresh check
+        return check_nodes()
+
+# Add a lightweight status function for quick status checks
+@app.route("/api/quick-status")
+@cache.cached(timeout=30)  # Cache for 30 seconds
+def quick_status():
+    """Return a minimal status without expensive node checks"""
+    try:
+        # Load the last log
+        with open(f"{log_dir}/node_status.json", "r") as file:
+            data = json.load(file)
+        
+        if not data:
+            return jsonify({"status": "unknown", "last_check": "never"})
+        
+        newest_entry = max(data, key=lambda x: datetime.strptime(x["date"], "%Y-%m-%d %H:%M:%S"))
+        last_check_time = format_last_check(datetime.strptime(newest_entry["date"], "%Y-%m-%d %H:%M:%S"))
+        
+        # Count nodes with issues
+        node_status = newest_entry["nodes"]
+        total_nodes = len(node_status)
+        nodes_with_issues = 0
+        
+        for node in node_status:
+            if (not node["plain_dns"] or not node["doh"] or not node["dot"] or 
+                not node["cert"]["valid"] or not node["cert_853"]["valid"]):
+                nodes_with_issues += 1
+        
+        return jsonify({
+            "status": "ok" if nodes_with_issues == 0 else "issues",
+            "last_check": last_check_time,
+            "total_nodes": total_nodes,
+            "nodes_with_issues": nodes_with_issues
+        })
+    except Exception as e:
+        logger.error(f"Error getting quick status: {e}")
+        return jsonify({"status": "error", "message": str(e)})
+
+# Optimize check_single_node with shorter timeouts
+def check_single_node(ip):
+    """Check a single node and return its status."""
+    logger.info(f"Checking node {ip}")
+    try:
+        # Add timeout handling for individual checks
+        plain_dns_result = False
+        doh_result = {"status": False, "server": []}
+        dot_result = False
+        cert_result = {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"}
+        cert_853_result = {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"}
+        
+        # Use timeout to limit time spent on each check
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_plain_dns = executor.submit(check_plain_dns, ip)
+            future_doh = executor.submit(check_doh, ip)
+            future_dot = executor.submit(check_dot, ip)
+            future_cert = executor.submit(verify_cert, ip, 443)
+            future_cert_853 = executor.submit(verify_cert, ip, 853)
+            
+            # Collect results with timeout
+            try:
+                plain_dns_result = future_plain_dns.result(timeout=5)
+            except (concurrent.futures.TimeoutError, Exception) as e:
+                logger.warning(f"Plain DNS check timed out for {ip}: {str(e)}")
+                
+            try:
+                doh_result = future_doh.result(timeout=5)
+            except (concurrent.futures.TimeoutError, Exception) as e:
+                logger.warning(f"DoH check timed out for {ip}: {str(e)}")
+                
+            try:
+                dot_result = future_dot.result(timeout=5)
+            except (concurrent.futures.TimeoutError, Exception) as e:
+                logger.warning(f"DoT check timed out for {ip}: {str(e)}")
+                
+            try:
+                cert_result = future_cert.result(timeout=5)
+            except (concurrent.futures.TimeoutError, Exception) as e:
+                logger.warning(f"Cert check timed out for {ip}: {str(e)}")
+                
+            try:
+                cert_853_result = future_cert_853.result(timeout=5)
+            except (concurrent.futures.TimeoutError, Exception) as e:
+                logger.warning(f"Cert 853 check timed out for {ip}: {str(e)}")
+        
+        node_status = {
+            "ip": ip,
+            "name": node_names[ip] if ip in node_names else ip,
+            "location": (
+                node_locations[ip] if ip in node_locations else "Unknown"
+            ),
+            "plain_dns": plain_dns_result,
+            "doh": doh_result["status"],
+            "doh_server": doh_result["server"],
+            "dot": dot_result,
+            "cert": cert_result,
+            "cert_853": cert_853_result,
+        }
+        logger.info(f"Node {ip} check complete")
+        return node_status
+    except Exception as e:
+        logger.error(f"Error checking node {ip}: {e}")
+        # Add a failed entry for this node to ensure it's still included
+        return {
+            "ip": ip,
+            "name": node_names[ip] if ip in node_names else ip,
+            "location": (
+                node_locations[ip] if ip in node_locations else "Unknown"
+            ),
+            "plain_dns": False,
+            "doh": False,
+            "doh_server": [],
+            "dot": False,
+            "cert": {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"},
+            "cert_853": {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"},
+        }
+
+# Run the app with threading enabled
 if __name__ == "__main__":
     # The scheduler is already started in the app context above
-    # Run the Flask app
-    app.run(debug=True, port=5000, host="0.0.0.0")
+    # Run the Flask app with threading for better concurrency
+    app.run(debug=True, port=5000, host="0.0.0.0", threaded=True)

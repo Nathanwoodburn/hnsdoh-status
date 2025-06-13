@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HNSDoH Status</title>
+    <link rel="stylesheet" href="/assets/css/style.css">
+    <meta name="description" content="HNSDoH Status page - Monitoring the status of HNSDoH resolvers">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <style>
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 5px solid #3498db;
+            width: 40px;
+            height: 40px;
+            margin: 20px auto;
+            animation: spin 1.5s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .quick-status {
+            text-align: center;
+            padding: 20px;
+            margin: 20px;
+            border-radius: 5px;
+            background-color: #f5f5f5;
+        }
+        
+        .status-ok {
+            color: green;
+        }
+        
+        .status-issues {
+            color: orange;
+        }
+        
+        .status-error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>HNSDoH Status</h1>
+        <p>Monitoring the status of HNSDoH resolvers</p>
+    </header>
+    
+    <div class="quick-status">
+        <h2>Current Status</h2>
+        <div id="quick-status-display">Loading...</div>
+        <div class="loader" id="status-loader"></div>
+    </div>
+    
+    <main>
+        <div id="content">
+            <div class="loader"></div>
+            <p>Loading full status data...</p>
+            <p>This may take a few moments as we check all resolver nodes.</p>
+        </div>
+    </main>
+    
+    <footer>
+        <p>Made by <a href="https://nathan.woodburn.au">Nathan.Woodburn/</a></p>
+    </footer>
+    
+    <script>
+        // Load quick status first
+        fetch('/api/quick-status')
+            .then(response => response.json())
+            .then(data => {
+                const statusDisplay = document.getElementById('quick-status-display');
+                const statusLoader = document.getElementById('status-loader');
+                
+                let statusClass = 'status-ok';
+                let statusMessage = 'All systems operational';
+                
+                if (data.status === 'issues') {
+                    statusClass = 'status-issues';
+                    statusMessage = `${data.nodes_with_issues} out of ${data.total_nodes} nodes have issues`;
+                } else if (data.status === 'error' || data.status === 'unknown') {
+                    statusClass = 'status-error';
+                    statusMessage = 'Unable to determine system status';
+                }
+                
+                statusDisplay.innerHTML = `
+                    <h3 class="${statusClass}">${statusMessage}</h3>
+                    <p>Last check: ${data.last_check}</p>
+                `;
+                
+                statusLoader.style.display = 'none';
+            })
+            .catch(error => {
+                document.getElementById('quick-status-display').innerHTML = `
+                    <h3 class="status-error">Error loading status</h3>
+                    <p>${error}</p>
+                `;
+                document.getElementById('status-loader').style.display = 'none';
+            });
+        
+        // Then load full page data
+        fetch('/api/nodes')
+            .then(response => response.json())
+            .then(nodeData => {
+                // Once we have node data, get history data
+                return Promise.all([
+                    Promise.resolve(nodeData),
+                    fetch('/api/history').then(res => res.json())
+                ]);
+            })
+            .then(([nodeData, historyData]) => {
+                // Now we have both datasets, fetch the HTML with them
+                return fetch('/?' + new URLSearchParams({
+                    _data_loaded: 'true'  // Signal to the server we already have data
+                }));
+            })
+            .then(response => response.text())
+            .then(html => {
+                document.getElementById('content').innerHTML = html;
+                
+                // Replace direct links with JS-enhanced versions
+                document.querySelectorAll('a').forEach(link => {
+                    const href = link.getAttribute('href');
+                    if (href && href.startsWith('/') && !href.includes('fast_load')) {
+                        link.setAttribute('href', href + (href.includes('?') ? '&' : '?') + 'fast_load=true');
+                    }
+                });
+            })
+            .catch(error => {
+                document.getElementById('content').innerHTML = `
+                    <div class="error">
+                        <h2>Error Loading Data</h2>
+                        <p>There was a problem loading the full status data. Please try refreshing the page.</p>
+                        <p>Error details: ${error}</p>
+                        <a href="/" class="button">Refresh Page</a>
+                    </div>
+                `;
+            });
+    </script>
+</body>
+</html>

@@ -1,13 +1,13 @@
 import time
 import signal
 import threading
+import concurrent.futures
 from flask import Flask
-from server import app
+from server import app, node_check_executor
 import server
 from gunicorn.app.base import BaseApplication
 import os
 import dotenv
-import concurrent.futures
 import schedule
 
 
@@ -58,6 +58,10 @@ def run_gunicorn():
 def signal_handler(sig, frame):
     print("Shutting down gracefully...", flush=True)
     stop_event.set()
+    
+    # Shutdown the node check executor
+    print("Shutting down thread pools...", flush=True)
+    node_check_executor.shutdown(wait=False)
 
 
 if __name__ == '__main__':
@@ -79,6 +83,10 @@ if __name__ == '__main__':
         finally:
             stop_event.set()
             scheduler_future.cancel()
+            
+            # Make sure to shut down node check executor
+            node_check_executor.shutdown(wait=False)
+            
             try:
                 scheduler_future.result(timeout=5)
             except concurrent.futures.CancelledError:
