@@ -1,174 +1,128 @@
 <!DOCTYPE html>
-<html data-bs-theme="dark" lang="en-au">
+<html lang="en">
 
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=no">
-    <title>Status | HNS DoH</title>
-    <meta name="twitter:image" content="https://status.hnsdoh.com/assets/img/HNS.png">
-    <meta name="twitter:card" content="summary">
-    <meta name="twitter:description" content="Access Handshake Domains with DNS over HTTPS">
-    <meta property="og:title" content="Status | HNS DoH">
-    <meta name="description" content="Access Handshake Domains with DNS over HTTPS">
-    <meta property="og:type" content="website">
-    <meta property="og:description" content="Access Handshake Domains with DNS over HTTPS">
-    <meta name="twitter:title" content="Status | HNS DoH">
-    <meta property="og:image" content="https://status.hnsdoh.com/assets/img/HNS.png">
-    <script type="application/ld+json">
-        {
-            "@context": "http://schema.org",
-            "@type": "WebSite",
-            "name": "Status | HNS DoH",
-            "url": "https://status.hnsdoh.com"
-        }
-    </script>
-    <link rel="icon" type="image/png" sizes="670x700" href="assets/img/HNS.png">
-    <link rel="icon" type="image/png" sizes="670x700" href="assets/img/HNSW.png" media="(prefers-color-scheme: dark)">
-    <link rel="icon" type="image/png" sizes="670x700" href="assets/img/HNS.png">
-    <link rel="icon" type="image/png" sizes="670x700" href="assets/img/HNSW.png" media="(prefers-color-scheme: dark)">
-    <link rel="icon" type="image/png" sizes="670x700" href="assets/img/HNS.png">
-    <link rel="icon" type="image/png" sizes="670x700" href="assets/img/HNS.png">
-    <link rel="icon" type="image/png" sizes="670x700" href="assets/img/HNS.png">
-    <link rel="stylesheet" href="assets/bootstrap/css/bootstrap.min.css">
-    <link rel="stylesheet" href="assets/css/bs-theme-overrides.css">
-    <link rel="stylesheet" href="assets/css/Navbar-Right-Links-Dark-icons.css">
-    <link rel="stylesheet" href="assets/css/Team-images.css">
-    <link rel="stylesheet" href="assets/css/index.css">
-    <link rel="manifest" href="manifest.json">
-
-    <script async src="https://umami.woodburn.au/script.js"
-        data-website-id="7e0ed7e4-3858-4124-a574-b57ac05aaad1"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HNSDoH Status</title>
+    <link rel="stylesheet" href="/assets/style.css">
+    <link rel="icon" type="image/png" href="/favicon.png">
 </head>
 
 <body>
-    <header>
-        <nav class="navbar navbar-expand-md fixed-top bg-dark py-3" data-bs-theme="dark">
-            <div class="container-fluid"><a class="navbar-brand d-flex align-items-center" href="https://welcome.hnsdoh.com"><span
-                        class="bs-icon-sm bs-icon-rounded bs-icon-primary d-flex justify-content-center align-items-center me-2 bs-icon"><img
-                            src="assets/img/HNSW.png" width="20px"></span><span>HNS DoH</span></a></div>
-        </nav>
-    </header>
-    <div style="margin: 100px;"></div>
-    <section id="intro">
-        <div class="text-center">
-            <h1 class="text-center" style="font-size: 60px;">HNS DoH Status</h1>
-            <div class="errors">
-                <!-- Check if errors is empty -->
-                {% if alerts %}
-                <div class="alert alert-danger" role="alert">
-                    <h4 class="alert-heading">Alert</h4>
-                    {% for alert in alerts %}
-                    <p>{{ alert }}</p>
-                    {% endfor %}
-                </div>
-                {% endif %}
-
-            </div>
-            <div class="warnings">
-                <!-- Check if warnings is empty -->
-                {% if warnings %}
-                <div class="alert alert-warning" role="alert">
-                    <h4 class="alert-heading">Warning</h4>
-                    {% for warning in warnings %}
-                    <p>{{ warning }}</p>
-                    {% endfor %}
-                </div>
-                {% endif %}
-
-            </div>
-        </div>
-    </section>
-
-    <section id="status"></section>
-    <div class="text-center" style="width: fit-content;margin: auto;max-width: 100%;">
-        <span style="font-size: smaller;margin-bottom: 10px;">Last check: {{last_check}}</span>
-        <div class="spacer"></div>
-        <div class="node" style="display: block;">
+    <div class="container">
+        <header>
             <div>
-                <h2>Overall Stats</h2>
+                <h1>HNSDoH Status</h1>
+                <div class="meta">Handshake DNS over HTTPS/TLS</div>
             </div>
-            <div class="node-info">
-                <p>Plain DNS: {{history.overall.plain_dns.percentage}}% uptime (last down
-                    {{history.overall.plain_dns.last_down}})</p>
-                <p>DNS over HTTPS: {{history.overall.doh.percentage}}% uptime (last down
-                    {{history.overall.doh.last_down}})</p>
-                <p>DNS over TLS: {{history.overall.dot.percentage}}% uptime (last down
-                    {{history.overall.dot.last_down}})</p>
+            <div class="meta">
+                Last checked: {{ last_check }}
             </div>
+        </header>
+
+        {% if alerts or warnings %}
+        <div class="alerts-section">
+            {% for alert in alerts %}
+            <div class="alert-box error">{{ alert }}</div>
+            {% endfor %}
+            {% for warning in warnings %}
+            <div class="alert-box warning">{{ warning }}</div>
+            {% endfor %}
         </div>
-        <div class="spacer"></div>
-        {% for node in nodes %}
-        <div class="node {{node.class}}">
-            <div>
-                <h2>{{node.location}}</h2>
+        {% endif %}
+
+        <h2>Node Status</h2>
+        <div class="node-grid">
+            {% for node in nodes %}
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="node-name">{{ node.name }}</div>
+                        <div class="node-location">{{ node.location }}</div>
+                    </div>
+                    <div class="node-ip">{{ node.ip }}</div>
+                </div>
+
+                <div class="status-list">
+                    <div class="status-item">
+                        <span>Plain DNS</span>
+                        <span class="badge {{ 'up' if node.plain_dns else 'down' }}">
+                            {{ 'UP' if node.plain_dns else 'DOWN' }}
+                        </span>
+                    </div>
+
+                    <div class="status-item">
+                        <span>DoH (443)</span>
+                        <span class="badge {{ 'up' if node.doh else 'down' }}">
+                            {{ 'UP' if node.doh else 'DOWN' }}
+                        </span>
+                    </div>
+
+                    <div class="status-item">
+                        <span>DoT (853)</span>
+                        <span class="badge {{ 'up' if node.dot else 'down' }}">
+                            {{ 'UP' if node.dot else 'DOWN' }}
+                        </span>
+                    </div>
+
+                    <div class="status-item">
+                        <span>Certificate</span>
+                        <div style="text-align: right;">
+                            <span class="badge {{ 'up' if node.cert.valid else 'down' }}">
+                                {{ 'VALID' if node.cert.valid else 'INVALID' }}
+                            </span>
+                            {% if node.cert.valid %}
+                            <div class="cert-info">Exp: {{ node.cert.expires }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="node-info">
-                <h5>Current Status</h5>
-                <p>Plain DNS: {{node.plain_dns}}</p>
-                <p>DNS over HTTPS: {{node.doh}}</p>
-                <p>DNS over TLS: {{node.dot}}</p>
-                <p>Certificate: {% if node.cert.valid %} Valid {% else %} Invalid {% endif %} (expires
-                    {{node.cert.expires}})</p>
-            </div>
-            <div class="node-info">
-                <h5>Stats</h5>
-                <p>Plain DNS: {{history.nodes[node.ip].plain_dns.percentage}}% uptime (last down
-                    {{history.nodes[node.ip].plain_dns.last_down}})</p>
-                <p>DNS over HTTPS: {{history.nodes[node.ip].doh.percentage}}% uptime (last down
-                    {{history.nodes[node.ip].doh.last_down}})</p>
-                <p>DNS over TLS: {{history.nodes[node.ip].dot.percentage}}% uptime (last down
-                    {{history.nodes[node.ip].dot.last_down}})</p>
-            </div>
-            <div class="node-info">
-                <p style="font-weight: bold;">{{node.name}}: {{node.ip}}</p>
-            </div>
+            {% endfor %}
         </div>
 
-        {% endfor %}
+        <h2>30-Day History</h2>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Node</th>
+                        <th style="text-align: center;">Plain DNS</th>
+                        <th style="text-align: center;">DoH</th>
+                        <th style="text-align: center;">DoT</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for node in history.nodes %}
+                    <tr>
+                        <td>
+                            <div class="node-name">{{ node.name }}</div>
+                            <div class="node-location">{{ node.location }}</div>
+                        </td>
+                        {% for type in ['plain_dns', 'doh', 'dot'] %}
+                        <td style="text-align: center;">
+                            <div>{{ node[type].percentage }}%</div>
+                            <div class="uptime-bar" style="margin: 4px auto 0;">
+                                <div class="uptime-fill {% if node[type].percentage < 90 %}warn{% endif %} {% if node[type].percentage < 70 %}bad{% endif %}"
+                                    style="width: {{ node[type].percentage }}%"></div>
+                            </div>
+                            {% if node[type].last_down != 'never' %}
+                            <div class="cert-info" style="text-align: center;">Last outage: {{ node[type].last_down }}</div>
+                            {% endif %}
+                        </td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="footer">
+            <p>Powered by <a href="https://nathan.woodburn.au">Nathan.Woodburn/</a></p>
+            <p><a href="/api">API Access</a></p>
+        </div>
     </div>
-    </section>
-
-    <section id="setup"
-        style="min-height: 400px;padding-top: 10vh;text-align: center;margin-right: 10%;margin-left: 10%;"
-        data-bs-target="#navcol-5" data-bs-smooth-scroll="true">
-        <h3 class="display-1">Setup</h3>
-        <ul class="list-group">
-            <li class="list-group-item">
-                <div>
-                    <h5 class="display-5">DNS over HTTPS</h5>
-                    <p>DNS over HTTPS is supported by most browsers. To add HNSDoH to your revolvers add this URL to
-                        your Secure DNS setting<br><code>https://hnsdoh.com/dns-query</code></p>
-                </div>
-            </li>
-            <li class="list-group-item">
-                <div>
-                    <h5 class="display-5">DNS over TLS</h5>
-                    <p>DNS over TLS is the best option for mobile phones. Simply set Private DNS to the
-                        hostname&nbsp;<br><code>hnsdoh.com</code></p>
-                </div>
-            </li>
-            <li class="list-group-item">
-                <div>
-                    <h5 class="display-5">Plain DNS</h5>
-                    <p>As a last resort you can use any of plain DNS below (best to chose 2 IPs from different
-                        people)<br><br>- 194.50.5.27 (powered by Nathan.Woodburn/)<br>-&nbsp;139.177.195.185 (powered by
-                        HNS Canada)<br>-&nbsp;172.233.46.92 (powered by Nathan.Woodburn/)<br>-&nbsp;172.105.120.203 (powered
-                        by Nathan.Woodburn/)<br>-&nbsp;18.169.98.42 (powered by Easy HNS)<br><br>Alternative Providers (Not
-                        running the HNSDoH software configuration)<br><br>- 194.50.5.26 (powered by
-                        Nathan.Woodburn/)<br>- 194.50.5.28 (powered by Nathan.Woodburn/)<br>-&nbsp;139.144.68.241
-                        (powered by HNS DNS)<br>- 139.144.68.242 (powered by HNS DNS)<br>- 2a01:7e01:e002:c300::
-                        (powered by HNS DNS)<br>- 2a01:7e01:e002:c500:: (powered by HNS DNS)</p>
-                </div>
-            </li>
-        </ul>
-    </section>
-    <footer class="text-center bg-dark">
-        <div class="container text-white py-4 py-lg-5">
-            <p class="text-muted mb-0">Copyright © 2024 HNSDoH</p>
-        </div>
-    </footer>
-    <script src="assets/bootstrap/js/bootstrap.min.js"></script>
-    <script src="assets/js/bs-init.js"></script>
 </body>
 
 </html>

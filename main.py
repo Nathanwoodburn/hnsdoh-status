@@ -1,14 +1,10 @@
-import time
+import sys
 import signal
 import threading
-import concurrent.futures
-from flask import Flask
-from server import app, node_check_executor
 import server
 from gunicorn.app.base import BaseApplication
 import os
 import dotenv
-import schedule
 
 
 class GunicornApp(BaseApplication):
@@ -26,28 +22,25 @@ class GunicornApp(BaseApplication):
         return self.application
 
 
-def check():
-    print('Checking nodes...', flush=True)
-    server.check_nodes()
-
-
-def run_scheduler(stop_event):
-    schedule.every(5).minutes.do(check)
-    while not stop_event.is_set():
-        schedule.run_pending()
-        time.sleep(1)
-
-
 def run_gunicorn():
     workers = os.getenv('WORKERS', 1)
     threads = os.getenv('THREADS', 2)
-    workers = int(workers)
-    threads = int(threads)
+    
+    try:
+        workers = int(workers)
+    except (ValueError, TypeError):
+        workers = 1
+        
+    try:
+        threads = int(threads)
+    except (ValueError, TypeError):
+        threads = 2
 
     options = {
         'bind': '0.0.0.0:5000',
         'workers': workers,
         'threads': threads,
+        'timeout': 120,
     }
 
     gunicorn_app = GunicornApp(server.app, options)
@@ -57,39 +50,41 @@ def run_gunicorn():
 
 def signal_handler(sig, frame):
     print("Shutting down gracefully...", flush=True)
-    stop_event.set()
     
-    # Shutdown the node check executor
+    # Shutdown the scheduler
+    if server.scheduler.running:
+        print("Stopping scheduler...", flush=True)
+        server.scheduler.shutdown()
+    
+    # Shutdown the node check executors
     print("Shutting down thread pools...", flush=True)
-    node_check_executor.shutdown(wait=False)
+    server.node_check_executor.shutdown(wait=False)
+    server.sub_check_executor.shutdown(wait=False)
+    
+    sys.exit(0)
 
 
 if __name__ == '__main__':
     dotenv.load_dotenv()
     
-    stop_event = threading.Event()
+    # Register signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        # Start the scheduler
-        scheduler_future = executor.submit(run_scheduler, stop_event)
+    # Start the scheduler from server.py
+    # This ensures we use the robust APScheduler defined there instead of the custom loop
+    print("Starting background scheduler...", flush=True)
+    with server.app.app_context():
+        server.start_scheduler()
         
-        try:
-            # Run the Gunicorn server
-            run_gunicorn()
-        except KeyboardInterrupt:
-            print("Shutting down server...", flush=True)
-        finally:
-            stop_event.set()
-            scheduler_future.cancel()
-            
-            # Make sure to shut down node check executor
-            node_check_executor.shutdown(wait=False)
-            
-            try:
-                scheduler_future.result(timeout=5)
-            except concurrent.futures.CancelledError:
-                print("Scheduler stopped.")
-            except Exception as e:
-                print(f"Scheduler did not stop cleanly: {e}")
+        # Run an immediate check in a background thread so we don't block startup
+        startup_thread = threading.Thread(target=server.scheduled_node_check)
+        startup_thread.daemon = True
+        startup_thread.start()
+        
+    try:
+        # Run the Gunicorn server
+        run_gunicorn()
+    except KeyboardInterrupt:
+        print("Shutting down server...", flush=True)
+        signal_handler(signal.SIGINT, None)

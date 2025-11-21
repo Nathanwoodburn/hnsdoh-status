@@ -1,10 +1,9 @@
 from collections import defaultdict
-from functools import cache, wraps
+from functools import wraps
 import json
 from flask import (
     Flask,
     make_response,
-    redirect,
     request,
     jsonify,
     render_template,
@@ -12,7 +11,6 @@ from flask import (
     send_file,
 )
 import os
-import json
 import requests
 import dns.resolver
 import dns.message
@@ -21,25 +19,23 @@ import dns.name
 import dns.rdatatype
 import ssl
 import dnslib
-import dnslib.dns
 import socket
 from datetime import datetime
 from dateutil import relativedelta
 import dotenv
 import time
 import logging
-import signal
 import sys
+import signal
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from flask_caching import Cache
 import functools
-import io
 import brotli
-from io import BytesIO
 import concurrent.futures
 from threading import Lock
+import gc
 
 # Set up logging BEFORE attempting imports that might fail
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -48,8 +44,12 @@ logger = logging.getLogger(__name__)
 # Set up ThreadPoolExecutor for parallel node checking
 # Use a reasonable number of workers based on CPU cores
 node_check_executor = concurrent.futures.ThreadPoolExecutor(
-    max_workers=min(32, os.cpu_count() * 4)  # Max 32 workers or 4x CPU cores
+    max_workers=min(32, (os.cpu_count() or 1) * 4)  # Max 32 workers or 4x CPU cores
 )
+
+# Shared executor for sub-checks (DNS, DoH, DoT, Certs) to prevent thread churn
+# Increased to 200 to accommodate all sub-tasks when max_workers (32) are active in the main pool
+sub_check_executor = concurrent.futures.ThreadPoolExecutor(max_workers=200)
 
 # Create a lock for thread safety when updating cache
 cache_lock = Lock()
@@ -71,17 +71,17 @@ cache = Cache(app)
 scheduler = BackgroundScheduler(daemon=True, job_defaults={'coalesce': True, 'max_instances': 1})
 
 node_names = {
-    "18.169.98.42": "Easy HNS",
-    "172.233.46.92": "Nathan.Woodburn/",
     "194.50.5.27": "Nathan.Woodburn/",
+    "18.169.98.42": "Easy HNS",
+    "172.233.46.92": "Marioo",    
     "139.177.195.185": "HNSCanada",
-    "172.105.120.203": "Nathan.Woodburn/",
+    "172.105.120.203": "NameGuardian/",
     "173.233.72.88": "Zorro"
 }
 node_locations = {
-    "18.169.98.42": "England",
-    "172.233.46.92": "Netherlands",
     "194.50.5.27": "Australia",
+    "18.169.98.42": "England",
+    "172.233.46.92": "Netherlands",    
     "139.177.195.185": "Canada",
     "172.105.120.203": "Singapore",
     "173.233.72.88": "United States"
@@ -110,7 +110,7 @@ else:
         sent_notifications = json.load(file)
 
 if (os.getenv("NODES")):
-    manual_nodes = os.getenv("NODES").split(",")
+    manual_nodes = os.getenv("NODES","").split(",")
 
 print(f"Log directory: {log_dir}", flush=True)
 
@@ -179,10 +179,14 @@ def faviconPNG():
 
 @app.route("/.well-known/<path:path>")
 def wellknown(path):
-    req = requests.get(f"https://nathan.woodburn.au/.well-known/{path}")
-    return make_response(
-        req.content, 200, {"Content-Type": req.headers["Content-Type"]}
-    )
+    try:
+        req = requests.get(f"https://nathan.woodburn.au/.well-known/{path}", timeout=10)
+        return make_response(
+            req.content, 200, {"Content-Type": req.headers["Content-Type"]}
+        )
+    except Exception as e:
+        logger.error(f"Error fetching well-known path {path}: {e}")
+        return make_response("Error fetching resource", 500)
 
 
 # endregion
@@ -268,6 +272,19 @@ def build_dns_query(domain: str, qtype: str = "A"):
     return q.pack()
 
 
+def send_down_notification(node):
+    """
+    Send a notification that a node is down.
+    This is a stub implementation to prevent crashes if the function is missing.
+    """
+    try:
+        # Implement your notification logic here (e.g. email, discord, slack)
+        # For now, we just log it to avoid crashing
+        logger.warning(f"Node DOWN: {node.get('name')} ({node.get('ip')})")
+    except Exception as e:
+        logger.error(f"Error sending notification: {e}")
+
+
 @retry(max_attempts=3, delay_seconds=2)
 def check_doh(ip: str) -> dict:
     status = False
@@ -351,12 +368,12 @@ def check_doh(ip: str) -> dict:
         if ssock:
             try:
                 ssock.close()
-            except:
+            except Exception:
                 pass
         if sock and sock != ssock:
             try:
                 sock.close()
-            except:
+            except Exception:
                 pass
                 
     return {"status": status, "server": server_name}
@@ -435,12 +452,12 @@ def verify_cert(ip: str, port: int) -> dict:
         if ssock:
             try:
                 ssock.close()
-            except:
+            except Exception:
                 pass
         if sock and sock != ssock:
             try:
                 sock.close()
-            except:
+            except Exception:
                 pass
                 
     return {"valid": valid, "expires": expires, "expiry_date": expiry_date_str}
@@ -482,12 +499,19 @@ def format_last_check(last_log: datetime) -> str:
         return "less than a minute ago"
 
 
-def check_nodes() -> list:
+def check_nodes(force=False) -> list:
     global nodes, _node_status_cache, _node_status_cache_time
-    if last_log > datetime.now() - relativedelta.relativedelta(minutes=1):
+    
+    # Skip check if done recently, unless forced
+    if not force and last_log > datetime.now() - relativedelta.relativedelta(minutes=1):
         # Load the last log
-        with open(f"{log_dir}/node_status.json", "r") as file:
-            data = json.load(file)
+        try:
+            with open(f"{log_dir}/node_status.json", "r") as file:
+                data = json.load(file)
+        except (json.JSONDecodeError, FileNotFoundError) as e:
+            logger.error(f"Error reading node_status.json: {e}")
+            data = []
+
         newest = {
             "date": datetime.now() - relativedelta.relativedelta(years=1),
             "nodes": [],
@@ -542,31 +566,34 @@ def check_nodes() -> list:
 
     # Send notifications if any nodes are down
     for node in node_status:
-        if (
-            not node["plain_dns"]
-            or not node["doh"]
-            or not node["dot"]
-            or not node["cert"]["valid"]
-            or not node["cert_853"]["valid"]
-        ):
-            send_down_notification(node)
-            continue
-        # Check if cert is expiring in 7 days
         try:
-            cert_expiry = datetime.strptime(
-                node["cert"]["expiry_date"], "%b %d %H:%M:%S %Y GMT"
-            )
-            if cert_expiry < datetime.now() + relativedelta.relativedelta(days=7):
+            if (
+                not node["plain_dns"]
+                or not node["doh"]
+                or not node["dot"]
+                or not node["cert"]["valid"]
+                or not node["cert_853"]["valid"]
+            ):
                 send_down_notification(node)
                 continue
-                
-            cert_853_expiry = datetime.strptime(
-                node["cert_853"]["expiry_date"], "%b %d %H:%M:%S %Y GMT"
-            )
-            if cert_853_expiry < datetime.now() + relativedelta.relativedelta(days=7):
-                send_down_notification(node)
+            # Check if cert is expiring in 7 days
+            try:
+                cert_expiry = datetime.strptime(
+                    node["cert"]["expiry_date"], "%b %d %H:%M:%S %Y GMT"
+                )
+                if cert_expiry < datetime.now() + relativedelta.relativedelta(days=7):
+                    send_down_notification(node)
+                    continue
+                    
+                cert_853_expiry = datetime.strptime(
+                    node["cert_853"]["expiry_date"], "%b %d %H:%M:%S %Y GMT"
+                )
+                if cert_853_expiry < datetime.now() + relativedelta.relativedelta(days=7):
+                    send_down_notification(node)
+            except Exception as e:
+                logger.error(f"Error processing certificate expiry for {node['ip']}: {e}")
         except Exception as e:
-            logger.error(f"Error processing certificate expiry for {node['ip']}: {e}")
+            logger.error(f"Error in notification loop for {node.get('ip')}: {e}")
     
     return node_status
 
@@ -582,39 +609,38 @@ def check_single_node(ip):
         cert_result = {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"}
         cert_853_result = {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"}
         
-        # Use timeout to limit time spent on each check
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            future_plain_dns = executor.submit(check_plain_dns, ip)
-            future_doh = executor.submit(check_doh, ip)
-            future_dot = executor.submit(check_dot, ip)
-            future_cert = executor.submit(verify_cert, ip, 443)
-            future_cert_853 = executor.submit(verify_cert, ip, 853)
+        # Use shared executor to avoid creating/destroying thread pools constantly
+        future_plain_dns = sub_check_executor.submit(check_plain_dns, ip)
+        future_doh = sub_check_executor.submit(check_doh, ip)
+        future_dot = sub_check_executor.submit(check_dot, ip)
+        future_cert = sub_check_executor.submit(verify_cert, ip, 443)
+        future_cert_853 = sub_check_executor.submit(verify_cert, ip, 853)
+        
+        # Collect results with timeout
+        try:
+            plain_dns_result = future_plain_dns.result(timeout=5)
+        except (concurrent.futures.TimeoutError, Exception) as e:
+            logger.warning(f"Plain DNS check timed out for {ip}: {str(e)}")
             
-            # Collect results with timeout
-            try:
-                plain_dns_result = future_plain_dns.result(timeout=5)
-            except (concurrent.futures.TimeoutError, Exception) as e:
-                logger.warning(f"Plain DNS check timed out for {ip}: {str(e)}")
-                
-            try:
-                doh_result = future_doh.result(timeout=5)
-            except (concurrent.futures.TimeoutError, Exception) as e:
-                logger.warning(f"DoH check timed out for {ip}: {str(e)}")
-                
-            try:
-                dot_result = future_dot.result(timeout=5)
-            except (concurrent.futures.TimeoutError, Exception) as e:
-                logger.warning(f"DoT check timed out for {ip}: {str(e)}")
-                
-            try:
-                cert_result = future_cert.result(timeout=5)
-            except (concurrent.futures.TimeoutError, Exception) as e:
-                logger.warning(f"Cert check timed out for {ip}: {str(e)}")
-                
-            try:
-                cert_853_result = future_cert_853.result(timeout=5)
-            except (concurrent.futures.TimeoutError, Exception) as e:
-                logger.warning(f"Cert 853 check timed out for {ip}: {str(e)}")
+        try:
+            doh_result = future_doh.result(timeout=5)
+        except (concurrent.futures.TimeoutError, Exception) as e:
+            logger.warning(f"DoH check timed out for {ip}: {str(e)}")
+            
+        try:
+            dot_result = future_dot.result(timeout=5)
+        except (concurrent.futures.TimeoutError, Exception) as e:
+            logger.warning(f"DoT check timed out for {ip}: {str(e)}")
+            
+        try:
+            cert_result = future_cert.result(timeout=5)
+        except (concurrent.futures.TimeoutError, Exception) as e:
+            logger.warning(f"Cert check timed out for {ip}: {str(e)}")
+            
+        try:
+            cert_853_result = future_cert_853.result(timeout=5)
+        except (concurrent.futures.TimeoutError, Exception) as e:
+            logger.warning(f"Cert 853 check timed out for {ip}: {str(e)}")
         
         node_status = {
             "ip": ip,
@@ -658,8 +684,12 @@ def log_status(node_status: list):
     # Check if the file exists
     filename = f"{log_dir}/node_status.json"
     if os.path.isfile(filename):
-        with open(filename, "r") as file:
-            data = json.load(file)
+        try:
+            with open(filename, "r") as file:
+                data = json.load(file)
+        except json.JSONDecodeError:
+            logger.error(f"Corrupted JSON in {filename}, starting fresh")
+            data = []
     else:
         data = []
 
@@ -758,13 +788,13 @@ def summarize_history(history: list) -> dict:
             # Update counts and last downtime
             for key in ["plain_dns", "doh", "dot"]:
                 status = node.get(key, "up")
-                if status == False:
+                if not status:
                     total_counts[ip][key]["down"] += 1
                 total_counts[ip][key]["total"] += 1
 
             # Update last downtime for each key
             for key in ["plain_dns", "doh", "dot"]:
-                if node.get(key) == False:
+                if not node.get(key):
                     # Check if the last downtime is more recent
                     if nodes_status[ip][key]["last_down"] == "never":
                         nodes_status[ip][key]["last_down"] = date.strftime("%Y-%m-%d %H:%M:%S")
@@ -907,7 +937,7 @@ def api_history():
     if "days" in request.args:
         try:
             history_days = int(request.args["days"])
-        except:
+        except Exception:
             pass
     history = get_history(history_days)
     history_summary = summarize_history(history)
@@ -929,12 +959,12 @@ def api_all():
     if "history" in request.args:
         try:
             history_days = int(request.args["history"])
-        except:
+        except Exception:
             pass
     if "days" in request.args:
         try:
             history_days = int(request.args["days"])
-        except:
+        except Exception:
             pass
     history = get_history(history_days)
     return jsonify(history)
@@ -942,7 +972,7 @@ def api_all():
 
 @app.route("/api/refresh")
 def api_refresh():
-    node_status = check_nodes()
+    node_status = check_nodes(force=True)
     return jsonify(node_status)
 
 @app.route("/api/latest")
@@ -1161,7 +1191,7 @@ def index():
     if "history" in request.args:
         try:
             history_days = int(request.args["history"])
-        except:
+        except Exception:
             pass
     history = get_history(history_days)
     history_summary = summarize_history(history)
@@ -1183,17 +1213,7 @@ def index():
             datetime.strptime(history_summary["overall"][key]["last_down"], "%Y-%m-%d %H:%M:%S")
         )
 
-    history_summary["nodes"] = convert_nodes_to_dict(history_summary["nodes"])
-
     last_check = format_last_check(last_log)
-
-    # Replace true/false with up/down
-    for node in node_status:
-        for key in ["plain_dns", "doh", "dot"]:
-            if node[key]:
-                node[key] = "Up"
-            else:
-                node[key] = "Down"
 
     return render_template(
         "index.html",
@@ -1259,11 +1279,16 @@ def scheduled_node_check():
         nodes = []  # Reset node list to force refresh
         
         # Run the check (which now uses ThreadPoolExecutor)
-        node_status = check_nodes()
+        # Force the check to bypass the 1-minute debounce
+        node_status = check_nodes(force=True)
         # Clear relevant caches
         cache.delete_memoized(api_nodes)
         cache.delete_memoized(api_errors)
         cache.delete_memoized(index)
+        
+        # Force garbage collection to prevent memory leaks over long periods
+        gc.collect()
+        
         logger.info("Completed scheduled node check and updated caches")
     except Exception as e:
         logger.error(f"Error in scheduled node check: {e}")
@@ -1307,14 +1332,29 @@ def signal_handler(sig, frame):
     if scheduler.running:
         scheduler.shutdown()
         logger.info("Scheduler shut down")
+    
+    # Shutdown thread pools
+    logger.info("Shutting down thread pools...")
+    node_check_executor.shutdown(wait=False)
+    sub_check_executor.shutdown(wait=False)
+    
     sys.exit(0)
+
+# Register the signal handlers
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 # Initialize the scheduler when the app starts without relying on @before_first_request
 # which is deprecated in newer Flask versions
-with app.app_context():
-    start_scheduler()
-    # Run an immediate check
-    scheduled_node_check()
+# Only start scheduler if we are the main process or not in debug mode reloader
+if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or __name__ == "__main__":
+    with app.app_context():
+        start_scheduler()
+        # Run an immediate check in a separate thread to not block startup
+        import threading
+        startup_thread = threading.Thread(target=scheduled_node_check)
+        startup_thread.daemon = True
+        startup_thread.start()
 
 # Custom Brotli compression for responses
 @app.after_request
@@ -1362,7 +1402,7 @@ def add_compression(response):
 
 def check_nodes_from_log():
     """Read the most recent node status from the log file."""
-    global _node_status_cache, _node_status_cache_time
+    global _node_status_cache, _node_status_cache_time, last_log
     
     # Return cached result if it's less than 2 minutes old (increased from 60s)
     with cache_lock:
@@ -1387,13 +1427,17 @@ def check_nodes_from_log():
                 newest = entry
                 newest["date"] = entry_date
         
+        # Update global last_log from the file data so the UI shows the correct time
+        if isinstance(newest["date"], datetime) and newest["date"] > last_log:
+             last_log = newest["date"]
+        
         # Update the cache
         with cache_lock:
             _node_status_cache = newest["nodes"]
             _node_status_cache_time = datetime.now()
         
         return newest["nodes"]
-    except Exception as e:
+    except (json.JSONDecodeError, FileNotFoundError, Exception) as e:
         logger.error(f"Error reading node status from log: {e}")
         # If we can't read from the log, run a fresh check
         return check_nodes()
@@ -1434,86 +1478,7 @@ def quick_status():
         logger.error(f"Error getting quick status: {e}")
         return jsonify({"status": "error", "message": str(e)})
 
-# Optimize check_single_node with shorter timeouts
-def check_single_node(ip):
-    """Check a single node and return its status."""
-    logger.info(f"Checking node {ip}")
-    try:
-        # Add timeout handling for individual checks
-        plain_dns_result = False
-        doh_result = {"status": False, "server": []}
-        dot_result = False
-        cert_result = {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"}
-        cert_853_result = {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"}
-        
-        # Use timeout to limit time spent on each check
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            future_plain_dns = executor.submit(check_plain_dns, ip)
-            future_doh = executor.submit(check_doh, ip)
-            future_dot = executor.submit(check_dot, ip)
-            future_cert = executor.submit(verify_cert, ip, 443)
-            future_cert_853 = executor.submit(verify_cert, ip, 853)
-            
-            # Collect results with timeout
-            try:
-                plain_dns_result = future_plain_dns.result(timeout=5)
-            except (concurrent.futures.TimeoutError, Exception) as e:
-                logger.warning(f"Plain DNS check timed out for {ip}: {str(e)}")
-                
-            try:
-                doh_result = future_doh.result(timeout=5)
-            except (concurrent.futures.TimeoutError, Exception) as e:
-                logger.warning(f"DoH check timed out for {ip}: {str(e)}")
-                
-            try:
-                dot_result = future_dot.result(timeout=5)
-            except (concurrent.futures.TimeoutError, Exception) as e:
-                logger.warning(f"DoT check timed out for {ip}: {str(e)}")
-                
-            try:
-                cert_result = future_cert.result(timeout=5)
-            except (concurrent.futures.TimeoutError, Exception) as e:
-                logger.warning(f"Cert check timed out for {ip}: {str(e)}")
-                
-            try:
-                cert_853_result = future_cert_853.result(timeout=5)
-            except (concurrent.futures.TimeoutError, Exception) as e:
-                logger.warning(f"Cert 853 check timed out for {ip}: {str(e)}")
-        
-        node_status = {
-            "ip": ip,
-            "name": node_names[ip] if ip in node_names else ip,
-            "location": (
-                node_locations[ip] if ip in node_locations else "Unknown"
-            ),
-            "plain_dns": plain_dns_result,
-            "doh": doh_result["status"],
-            "doh_server": doh_result["server"],
-            "dot": dot_result,
-            "cert": cert_result,
-            "cert_853": cert_853_result,
-        }
-        logger.info(f"Node {ip} check complete")
-        return node_status
-    except Exception as e:
-        logger.error(f"Error checking node {ip}: {e}")
-        # Add a failed entry for this node to ensure it's still included
-        return {
-            "ip": ip,
-            "name": node_names[ip] if ip in node_names else ip,
-            "location": (
-                node_locations[ip] if ip in node_locations else "Unknown"
-            ),
-            "plain_dns": False,
-            "doh": False,
-            "doh_server": [],
-            "dot": False,
-            "cert": {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"},
-            "cert_853": {"valid": False, "expires": "ERROR", "expiry_date": "ERROR"},
-        }
-
 # Run the app with threading enabled
 if __name__ == "__main__":
-    # The scheduler is already started in the app context above
-    # Run the Flask app with threading for better concurrency
-    app.run(debug=True, port=5000, host="0.0.0.0", threaded=True)
+    # Disable debug mode for production reliability to prevent double execution of scheduler
+    app.run(debug=False, port=5000, host="0.0.0.0", threaded=True)

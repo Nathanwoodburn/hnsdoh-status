@@ -4,17 +4,63 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Status | HNS DoH</title>
-    <link rel="icon" href="/assets/img/HNS.png" type="image/png">
-    <link rel="stylesheet" href="/assets/css/404.css">
+    <title>Page Not Found - HNSDoH Status</title>
+    <link rel="stylesheet" href="/assets/style.css">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <style>
+        .error-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 60vh;
+            text-align: center;
+        }
+        .error-code {
+            font-size: 6rem;
+            font-weight: 800;
+            color: var(--bg-card-hover);
+            line-height: 1;
+            margin-bottom: 1rem;
+        }
+        .error-title {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+        }
+        .error-msg {
+            color: var(--text-muted);
+            margin-bottom: 2rem;
+            max-width: 400px;
+        }
+        .btn {
+            display: inline-block;
+            background-color: var(--accent);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            transition: opacity 0.2s;
+        }
+        .btn:hover {
+            opacity: 0.9;
+            text-decoration: none;
+        }
+    </style>
 </head>
 
 <body>
-    <div class="spacer"></div>
-    <div class="centre">
-        <h1>404 | Page not found</h1>
-        <p>Sorry, the page you are looking for does not exist.</p>
-        <p><a href="/">Go back to the homepage</a></p>
+    <div class="container">
+        <div class="error-container">
+            <div class="error-code">404</div>
+            <div class="error-title">Page Not Found</div>
+            <div class="error-msg">The page you are looking for might have been removed, had its name changed, or is temporarily unavailable.</div>
+            <a href="/" class="btn">Return Home</a>
+        </div>
+
+        <div class="footer">
+            <p>Powered by <a href="https://nathan.woodburn.au">Nathan.Woodburn/</a></p>
+        </div>
     </div>
 </body>
 
