@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HNSDoH Status</title>
+    <link
+      rel="icon"
+      type="image/png"
+      href="{{ url_for('static', filename='icons/HNS.png') }}"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      media="(prefers-color-scheme: dark)"
+      href="{{ url_for('static', filename='icons/HNSW.png') }}"
+    />
+    <link
+      rel="apple-touch-icon"
+      href="{{ url_for('static', filename='icons/HNS.png') }}"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    <main class="layout">
+      <header class="hero">
+        <h1>HNSDoH Status</h1>
+        <p>Live checks for {{ domain }} nodes discovered from DNS A records.</p>
+        <div class="meta">
+          <span id="last-updated">Last updated: pending</span>
+          <span>Refresh: {{ ui_refresh_seconds }}s</span>
+        </div>
+      </header>
+
+      <section class="panel">
+        <table>
+          <thead>
+            <tr>
+              <th>Node IP</th>
+              <th>DNS UDP :53</th>
+              <th>DNS TCP :53</th>
+              <th>DoH :443</th>
+              <th>DoT :853</th>
+            </tr>
+          </thead>
+          <tbody id="status-table-body"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script>
+      window.HNSDOH_UI_REFRESH_SECONDS = {{ ui_refresh_seconds }};
+    </script>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>
