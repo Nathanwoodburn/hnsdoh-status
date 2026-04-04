@@ -34,6 +34,10 @@ body {
     radial-gradient(circle at 10% 10%, #cfeadf 0, transparent 32%),
     radial-gradient(circle at 90% 0%, #b4d6e3 0, transparent 28%),
     var(--bg);
+  background-repeat: no-repeat;
+  background-size: 140vmax 140vmax, 120vmax 120vmax, auto;
+  background-position: left top, right top, center;
+  background-attachment: fixed;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -42,6 +46,10 @@ body {
       radial-gradient(circle at 10% 10%, #143342 0, transparent 35%),
       radial-gradient(circle at 90% 0%, #233a46 0, transparent 30%),
       var(--bg);
+    background-repeat: no-repeat;
+    background-size: 140vmax 140vmax, 120vmax 120vmax, auto;
+    background-position: left top, right top, center;
+    background-attachment: fixed;
   }
 }
 

@@ -23,7 +23,7 @@ uv sync
 uv run python main.py
 ```
 
-The app runs on `0.0.0.0:8000` by default.
+The app runs on `0.0.0.0:5000` by default.
 
 ## API Endpoints
 
